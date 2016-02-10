@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>IDESourceControlProjectFavoriteDictionaryKey</key>
+	<false/>
+	<key>IDESourceControlProjectIdentifier</key>
+	<string>F7AC034E-2469-4CA5-8C0D-9A2FDBA3E0ED</string>
+	<key>IDESourceControlProjectName</key>
+	<string>project</string>
+	<key>IDESourceControlProjectOriginsDictionary</key>
+	<dict>
+		<key>C662C991A2175A3530D7BF20E2218E81B7BCF419</key>
+		<string>https://github.com/ZainManji/SquadUp.git</string>
+	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>Squad Up.xcodeproj/project.xcworkspace</string>
+	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
+	<dict>
+		<key>C662C991A2175A3530D7BF20E2218E81B7BCF419</key>
+		<string>../..</string>
+	</dict>
+	<key>IDESourceControlProjectURL</key>
+	<string>https://github.com/ZainManji/SquadUp.git</string>
+	<key>IDESourceControlProjectVersion</key>
+	<integer>111</integer>
+	<key>IDESourceControlProjectWCCIdentifier</key>
+	<string>C662C991A2175A3530D7BF20E2218E81B7BCF419</string>
+	<key>IDESourceControlProjectWCConfigurations</key>
+	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>C662C991A2175A3530D7BF20E2218E81B7BCF419</string>
+			<key>IDESourceControlWCCName</key>
+			<string>Squad%20Up</string>
+		</dict>
+	</array>
+</dict>
+</plist>

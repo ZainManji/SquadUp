@@ -21,6 +21,7 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        print("inside log in view controller")
     }
     
     
@@ -51,28 +52,33 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
         
         // Reset Facebook Contacts to an empty dictionary so we can refetch
         self.resetFacebookContacts()
-
-        if currentUser != nil {
-            
-            // Get friend data at the beginning
+        
+        
+        if (FBSDKAccessToken.currentAccessToken() != nil) {
+            // User is already logged in, do work such as go to next view controller.
             if (currentUser != nil) {
+                print("CURRENT USER LOGGED IN WITH FACEBOOK")
                 if PFFacebookUtils.isLinkedWithUser(currentUser!) {
-                    print("Getting Facebook friends for the user.")
+                    print("Getting Facebook friends for the user :)")
                     self.getFacebookFriends()
                 }
-            }
+            //}
             
-            // Transition to home screen if user is already logged in
-            let homeViewController = self.storyboard!.instantiateViewControllerWithIdentifier("SquadUpHome") as? MasterTableViewController
-            self.navigationController?.pushViewController(homeViewController!, animated: false)
+                // Transition to home screen if user is already logged in
+                let homeViewController = self.storyboard!.instantiateViewControllerWithIdentifier("SquadUpHome") as? MasterTableViewController
+                self.navigationController?.pushViewController(homeViewController!, animated: false)
+            }
         } else {
             // Show the signup/login screen
+            print("current access token is nULL")
             let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
             userDefaults.setObject(true, forKey: "loggedOut")
             userDefaults.synchronize()
             let logInViewController = self.storyboard!.instantiateViewControllerWithIdentifier("LogInScreen") as? CustomLogInViewController
             self.navigationController?.pushViewController(logInViewController!, animated: false)
         }
+
+
     }
 
     override func didReceiveMemoryWarning() {
@@ -86,13 +92,15 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
         let fbRequest = FBSDKGraphRequest(graphPath:"/me/friends", parameters: nil)
         fbRequest.startWithCompletionHandler { (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
             
-            let resultDict = result as! NSMutableDictionary
-            let data:NSMutableArray = resultDict.objectForKey("data") as! NSMutableArray
+            if (result != nil) {
+                let resultDict = result as! NSMutableDictionary
+                let data:NSArray = resultDict.objectForKey("data") as! NSArray
             
-            for var i = 0; i < data.count; i++ {
-                let valueDict : NSMutableDictionary = data[i] as! NSMutableDictionary
-                let id = valueDict.objectForKey("id") as! String
-                self.getFacebookName(String(id))
+                for var i = 0; i < data.count; i++ {
+                    let valueDict : NSMutableDictionary = data[i] as! NSMutableDictionary
+                    let id = valueDict.objectForKey("id") as! String
+                    self.getFacebookName(String(id))
+                }
             }
             
             if error == nil {
@@ -108,8 +116,6 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
     func getFacebookName(id: String) {
         let fbRequest = FBSDKGraphRequest(graphPath:"/" + id, parameters: nil)
         fbRequest.startWithCompletionHandler { (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
-            
-            var resultDict = result as! NSMutableDictionary
             
             if error == nil {
                 let str = result.objectForKey("name") as! String
@@ -158,7 +164,7 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
                                 if let copyLabel = ABMultiValueCopyLabelAtIndex(numbers,ix) {
                                     if let label = copyLabel.takeRetainedValue() as? String {
                                         
-                                        if (label != "_$!<Mobile>!$_" && label != "iPhone" && label != "_$!<Home>!$_" && label != "_$!<Other>!$_") {
+                                        if (label != "_$!<Mobile>!$_" && label != "iPhone" && label != "_$!<Home>!$_" && label != "_$!<Other>!$_" && label != "_$!<Work>!$_") {
                                             continue
                                         } else {
                                             
@@ -200,7 +206,6 @@ class LogInViewController: UIViewController, PFLogInViewControllerDelegate, PFSi
     
     func resetFacebookContacts() {
         let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
-        var facebookContacts:NSMutableDictionary? = userDefaults.objectForKey("facebookContacts") as? NSMutableDictionary
         let copy:NSMutableDictionary = NSMutableDictionary()
         userDefaults.setObject(copy, forKey: "facebookContacts")
         userDefaults.synchronize()

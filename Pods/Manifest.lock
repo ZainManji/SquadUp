@@ -1,0 +1,13 @@
+PODS:
+  - DGElasticPullToRefresh (1.0.3)
+  - GoogleMaps (1.10.5)
+
+DEPENDENCIES:
+  - DGElasticPullToRefresh
+  - GoogleMaps
+
+SPEC CHECKSUMS:
+  DGElasticPullToRefresh: 040f39ae69840b3261d163fe6735c5901bf851e9
+  GoogleMaps: da51c62c338c2d9c47cdad470a0d1e0e4b8544e4
+
+COCOAPODS: 0.39.0

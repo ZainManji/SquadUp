@@ -13,6 +13,9 @@ class GuestListTableViewCell: UITableViewCell {
     @IBOutlet var goingFriendLabel: UILabel!
     @IBOutlet var notGoingFriendLabel: UILabel!
     @IBOutlet var invitedFriendLabel: UILabel!
+    @IBOutlet var notGoingProfilePic: UIImageView!
+    @IBOutlet var goingProfilePic: UIImageView!
+    @IBOutlet var invitedProfilePic: UIImageView!
     
     override func awakeFromNib() {
         super.awakeFromNib()

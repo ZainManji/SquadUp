@@ -14,9 +14,17 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
     var user:PFUser?
     
     @IBOutlet var footerView: UIView!
+    
+    
+    override func viewDidAppear(animated: Bool) {
+        super.viewDidAppear(animated)
+        self.tableView.reloadData()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        self.title = "Settings"
         
         self.tableView.delegate = self
         self.tableView.dataSource = self
@@ -30,10 +38,13 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
         let myBackButton:UIButton = UIButton(type: UIButtonType.Custom)
         myBackButton.addTarget(self, action: "popDisplay:", forControlEvents: UIControlEvents.TouchUpInside)
         myBackButton.setTitle("Back", forState: UIControlState.Normal)
-        myBackButton.setTitleColor(UIColor.blueColor(), forState: UIControlState.Normal)
+        myBackButton.setTitleColor(UIColor.whiteColor(), forState: UIControlState.Normal)
+        myBackButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Highlighted)
         myBackButton.sizeToFit()
         let myCustomBackButtonItem:UIBarButtonItem = UIBarButtonItem(customView: myBackButton)
         self.navigationItem.leftBarButtonItem  = myCustomBackButtonItem
+        self.navigationController!.interactivePopGestureRecognizer!.enabled = true;
+        self.navigationController!.interactivePopGestureRecognizer!.delegate = self;
         
     }
 
@@ -89,7 +100,7 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
 
     
     func tableView(tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-        return 30
+        return 25
     }
     
     
@@ -102,19 +113,25 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
         return ""
     }
     
+    func tableView(tableView: UITableView, didHighlightRowAtIndexPath indexPath: NSIndexPath) {
+        tableView.cellForRowAtIndexPath(indexPath)!.backgroundColor = UIColor(red: 235.0/256.0, green: 235.0/256.0, blue: 235.0/256.0, alpha: 1.0)
+    }
+    
+    func tableView(tableView: UITableView, didUnhighlightRowAtIndexPath indexPath: NSIndexPath) {
+        tableView.cellForRowAtIndexPath(indexPath)!.backgroundColor = UIColor.whiteColor()
+    }
+    
     
     
     func tableView(tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
-        let border = UIView(frame: CGRectMake(0,0,self.view.bounds.width,1))
-        border.backgroundColor = UIColor(red: 187.0/256.0, green: 187.0/256.0, blue: 187.0/256.0, alpha: 1.0)
-        
-        
         let header: UITableViewHeaderFooterView = view as! UITableViewHeaderFooterView
+        
         header.contentView.backgroundColor = UIColor(red: 230.0/256.0, green: 230.0/256.0, blue: 230.0/256.0, alpha: 1.0)
-        header.textLabel!.font = UIFont(name: "Avenir", size: 14)!
+        header.textLabel!.font = UIFont(name: "HelveticaNeue-Light", size: 14)!
+        //header.textLabel!.textColor = UIColor(red: 28.0/255.0, green: 50.0/255.0, blue: 115.0/255.0, alpha: 1.0)
         header.textLabel!.textColor = UIColor(red: 107.0/256.0, green: 107.0/256.0, blue: 107.0/256.0, alpha: 1.0)
-        header.alpha = 1.0 //make the header transparent
-        header.addSubview(border)
+        header.alpha = 1.0
+        header.textLabel?.textAlignment = NSTextAlignment.Center
     }
     
     
@@ -123,11 +140,14 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
         
         if (indexPath.section == 0) {
             self.logOutAction()
+        } else if (indexPath.section == 1) {
+            table.cellForRowAtIndexPath(indexPath)!.backgroundColor = UIColor.whiteColor()
+            self.performSegueWithIdentifier("FeedbackSegue", sender: self)
         }
     }
     
     
-    /*
+    
     // MARK: - Navigation
 
     // In a storyboard-based application, you will often want to do a little preparation before navigation
@@ -135,6 +155,6 @@ class SettingsViewController: UIViewController, UITableViewDelegate, UITableView
         // Get the new view controller using segue.destinationViewController.
         // Pass the selected object to the new view controller.
     }
-    */
+
 
 }

@@ -20,11 +20,17 @@ class EventDetailsTableViewCell: UITableViewCell {
     @IBOutlet var notGoingButton: UIButton!
     @IBOutlet var invitedPeopleButton: UIButton!
     
+    @IBOutlet var cancelledLabel: UILabel!
     
     // Response buttons
     @IBOutlet var goingResponseButton: UIButton!
     @IBOutlet var notGoingResponseButton: UIButton!
     
+    @IBOutlet var helperView: UIView!
+    @IBOutlet var blastButton: UIButton!
+    @IBOutlet var numGoingImage: UIImageView!
+    @IBOutlet var numNotGoingImage: UIImageView!
+    @IBOutlet var numInvitedImage: UIImageView!
     
     override func awakeFromNib() {
         super.awakeFromNib()

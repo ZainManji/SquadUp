@@ -10,13 +10,20 @@ import UIKit
 import MapKit
 import CoreLocation
 import AddressBook
+import DGElasticPullToRefresh
+
+extension UIScrollView {
+    func dg_stopScrollingAnimation() {}
+}
 
 class EventDetailsViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate, UIGestureRecognizerDelegate {
     
 
+    @IBOutlet weak var bottomConstraint: NSLayoutConstraint!
     
     // For Details Section
     
+    var keyboardShown:Bool = false
     var eventNameString: String!
     var eventCreatorString: String!
     var timeString: String!
@@ -37,6 +44,8 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     var profilePicMap:NSMutableDictionary = NSMutableDictionary()
     
+    var blastImage:UIImage?
+    
     
     // For Comments Section
     @IBOutlet var footerView: UIView!
@@ -51,11 +60,17 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     
     var keyboardFrame:NSValue!
+    var viewAppeared:Bool = true
     
     
     override func viewDidAppear(animated: Bool) {
+        //self.DismissKeyboard()
+        self.viewAppeared = true
+        self.addCommentField.resignFirstResponder()
+        self.viewAppeared = false
+        //self.view.frame = CGRectOffset(self.view.frame, 0,  0)
         super.viewDidAppear(animated)
-        eventObject?.fetch()
+        eventObject?.fetchIfNeeded()
         eventData = eventObject!["dataSet"] as! NSMutableDictionary
         self.initializePage()
         self.tableView.reloadData()
@@ -85,10 +100,20 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
         myBackButton.addTarget(self, action: "popDisplay:", forControlEvents: UIControlEvents.TouchUpInside)
         myBackButton.setTitle("Back", forState: UIControlState.Normal)
         myBackButton.setTitleColor(UIColor.whiteColor(), forState: UIControlState.Normal)
+        myBackButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Highlighted)
         myBackButton.sizeToFit()
         let myCustomBackButtonItem:UIBarButtonItem = UIBarButtonItem(customView: myBackButton)
         self.navigationItem.leftBarButtonItem  = myCustomBackButtonItem
         self.navigationController!.interactivePopGestureRecognizer!.delegate = self;
+        
+        
+        // Customize edit button
+        let editButton:UIButton = UIButton(type: UIButtonType.Custom)
+        editButton.addTarget(self, action: "editEvent:", forControlEvents: UIControlEvents.TouchUpInside)
+        editButton.setTitle("Edit", forState: UIControlState.Normal)
+        editButton.setTitleColor(UIColor.whiteColor(), forState: UIControlState.Normal)
+        editButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Highlighted)
+        editButton.sizeToFit()
         
         // Customize blast button
         let blastButton:UIButton = UIButton(type: UIButtonType.Custom)
@@ -98,15 +123,37 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
         blastButton.setTitleColor(UIColor.greenColor(), forState: UIControlState.Highlighted)
         blastButton.sizeToFit()
         
+        let eventCancelled:Bool = (self.eventObject?.objectForKey("dataSet")?.objectForKey("eventCancelled") as! Bool)
+        
+        
         if (self.user?.objectId == eventCreator) {
+            editButton.enabled = true
+            editButton.hidden = false
+            
             blastButton.enabled = true
-            let customBlastButton:UIBarButtonItem = UIBarButtonItem(customView: blastButton)
-            self.navigationItem.rightBarButtonItem  = customBlastButton
-        } else {
+            blastButton.hidden = false
+            
+            let customEditButton:UIBarButtonItem = UIBarButtonItem(customView: editButton)
+            self.navigationItem.rightBarButtonItem  = customEditButton
+        } else if (eventCancelled) {
+            editButton.enabled = false
+            editButton.hidden = true
+            
             blastButton.enabled = false
-            blastButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Normal)
-            let customBlastButton:UIBarButtonItem = UIBarButtonItem(customView: blastButton)
-            self.navigationItem.rightBarButtonItem  = customBlastButton
+            blastButton.hidden = true
+            
+            let customEditButton:UIBarButtonItem = UIBarButtonItem(customView: editButton)
+            self.navigationItem.rightBarButtonItem  = customEditButton
+            self.navigationItem.rightBarButtonItem?.enabled = false
+        } else {
+            editButton.enabled = false
+            editButton.hidden = true
+            
+            blastButton.enabled = false
+            blastButton.hidden = true
+            
+            let customEditButton:UIBarButtonItem = UIBarButtonItem(customView: editButton)
+            self.navigationItem.rightBarButtonItem  = customEditButton
             self.navigationItem.rightBarButtonItem?.enabled = false
         }
         
@@ -143,19 +190,31 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        self.view.backgroundColor = UIColor(red: 230.0/256.0, green: 230.0/256.0, blue: 230.0/256.0, alpha: 1.0)
+        
+        
+        
+        self.addCommentField.delegate = self
         self.initializePage()
+        
+        self.title = eventNameString
         
         // Create top border for comment button section
         let upperBorder:CALayer = CALayer();
-        upperBorder.backgroundColor = UIColor.redColor().CGColor;
+        upperBorder.backgroundColor = UIColor(red: 28.0/255.0, green: 50.0/255.0, blue: 115.0/255.0, alpha: 1.0).CGColor;
         upperBorder.frame = CGRectMake(0, 0, CGRectGetWidth(self.footerView.frame), 1.0);
         self.footerView.layer.addSublayer(upperBorder)
         
         
         
+        
+//        NSNotificationCenter.defaultCenter().addObserver(self, selector: "keyboardWillShow:", name: UIKeyboardWillShowNotification, object: nil)
+        
         NSNotificationCenter.defaultCenter().addObserver(self, selector: "keyboardWillShow:", name: UIKeyboardWillShowNotification, object: nil)
+        
+        NSNotificationCenter.defaultCenter().addObserver(self, selector: "keyboardWillHide:", name: UIKeyboardWillHideNotification, object: nil)
 
-
+        
 
         
         
@@ -184,16 +243,58 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
         //self.getCommentsList()
         
         self.addCommentField.delegate = self
-        tableView.delegate = self
-        tableView.dataSource = self
+        self.tableView.delegate = self
+        self.tableView.dataSource = self
         
-        self.newRefreshControl = UIRefreshControl()
-        self.newRefreshControl.attributedTitle = NSAttributedString(string: "Pull to refresh")
-        self.newRefreshControl.addTarget(self, action: "refreshPage:", forControlEvents: UIControlEvents.ValueChanged)
-        self.tableView.addSubview(newRefreshControl)
+        self.tableView.estimatedRowHeight = 350
+        self.tableView.rowHeight = UITableViewAutomaticDimension
         
+//        self.newRefreshControl = UIRefreshControl()
+//        self.newRefreshControl.attributedTitle = NSAttributedString(string: "Pull to refresh")
+//        self.newRefreshControl.addTarget(self, action: "refreshPage:", forControlEvents: UIControlEvents.ValueChanged)
+//        self.tableView.addSubview(newRefreshControl)
         
+        // Initialize tableView
+        let loadingView = DGElasticPullToRefreshLoadingViewCircle()
+        loadingView.tintColor = UIColor(red: 78/255.0, green: 221/255.0, blue: 200/255.0, alpha: 1.0)
+        self.tableView.dg_addPullToRefreshWithActionHandler({ [weak self] () -> Void in
+            // Add your logic here
+            // Do not forget to call dg_stopLoading() at the end
+            print("Refreshing pull")
+            
+            self!.getCommentsList()
+            self!.tableView.reloadData()
+            //self!.tableView.reloadData()
+            self?.tableView.dg_stopLoading()
+            }, loadingView: loadingView)
+        self.tableView.dg_setPullToRefreshFillColor(UIColor(red: 57/255.0, green: 67/255.0, blue: 89/255.0, alpha: 1.0))
+        self.tableView.dg_setPullToRefreshBackgroundColor(tableView.backgroundColor!)
 
+    }
+    
+    deinit {
+        self.tableView.dg_removePullToRefresh()
+    }
+    
+    
+    func respondToSwipeGesture(gesture: UIGestureRecognizer) {
+        
+        if let swipeGesture = gesture as? UISwipeGestureRecognizer {
+            
+            
+            switch swipeGesture.direction {
+            case UISwipeGestureRecognizerDirection.Right:
+                print("Swiped right")
+            case UISwipeGestureRecognizerDirection.Down:
+                print("Swiped down")
+            case UISwipeGestureRecognizerDirection.Left:
+                print("Swiped left")
+            case UISwipeGestureRecognizerDirection.Up:
+                print("Swiped up")
+            default:
+                break
+            }
+        }
     }
 
     override func didReceiveMemoryWarning() {
@@ -240,63 +341,71 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     }
     
     
-    // Cancel event
-    @IBAction func cancelEvent(sender: AnyObject) {
-        let alert = UIAlertController(title:"Cancel squad event?", message: "Are you sure you want to cancel the squad event?", preferredStyle: UIAlertControllerStyle.Alert)
-        alert.addAction(UIAlertAction(title:"Yes", style: .Default, handler: { action in
-            self.dismissViewControllerAnimated(true, completion:nil)
-        }))
-        
-        let eventItem:NSMutableDictionary = eventObject!["dataSet"] as! NSMutableDictionary
-        eventItem["eventCancelled"] = true
-        self.eventObject!["dataSet"] = eventItem
-        self.eventObject?.save()
-        
-        
-        var users:[AnyObject] = []
-        if let goingPeople:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
-            goingPeople.removeObjectForKey(self.user!.objectId!)
-            users = goingPeople.allKeys
-        }
-        
-        if let invitedPeople:NSMutableDictionary = eventData["invitedPeopleWithApp"] as? NSMutableDictionary {
-            invitedPeople.removeObjectForKey(self.user!.objectId!)
-            users = users + invitedPeople.allKeys
-        }
-        
-        
-        // Send push notification to people who are going/invited to event
-        let pushQuery = PFInstallation.query()
-        pushQuery?.whereKey("userId", containedIn: users)
-        let push = PFPush()
-        push.setQuery(pushQuery)
-        push.setMessage("The event, " + eventNameString + " has been cancelled!")
-        push.sendPushInBackground()
-        
-        
-        self.popDisplay(sender)
-        
-        // Need to notify going/invited people that event has been cancelled
-        self.tableView.reloadData()
-        
-    }
+//    // Cancel event
+//    @IBAction func cancelEvent(sender: AnyObject) {
+//        let cancelAlert = UIAlertController(title: "Cancel Event?", message: "Are you sure you want to cancel the event for the squad?", preferredStyle: UIAlertControllerStyle.Alert)
+//        
+//        cancelAlert.addAction(UIAlertAction(title: "Yes", style: .Default, handler: { (action: UIAlertAction!) in
+//            
+//            let eventItem:NSMutableDictionary = self.eventObject!["dataSet"] as! NSMutableDictionary
+//            eventItem["eventCancelled"] = true
+//            self.eventObject!["dataSet"] = eventItem
+//            self.eventObject?.save()
+//            
+//            
+//            var users:[AnyObject] = []
+//            if let goingPeople:NSMutableDictionary = self.eventData["goingPeople"] as? NSMutableDictionary {
+//                goingPeople.removeObjectForKey(self.user!.objectId!)
+//                users = goingPeople.allKeys
+//            }
+//            
+//            if let invitedPeople:NSMutableDictionary = self.eventData["invitedPeopleWithApp"] as? NSMutableDictionary {
+//                invitedPeople.removeObjectForKey(self.user!.objectId!)
+//                users = users + invitedPeople.allKeys
+//            }
+//            
+//            
+//            // Send push notification to people who are going/invited to event
+//            let pushQuery = PFInstallation.query()
+//            pushQuery?.whereKey("userId", containedIn: users)
+//            let push = PFPush()
+//            push.setQuery(pushQuery)
+//            push.setMessage("The event, " + self.eventNameString + " has been cancelled!")
+//            push.sendPushInBackground()
+//            
+//            
+//            self.popDisplay(sender)
+//            
+//            // Need to notify going/invited people that event has been cancelled
+//            self.tableView.reloadData()
+//        }))
+//        
+//        
+//        // Cancel action
+//        cancelAlert.addAction(UIAlertAction(title: "No", style: .Default, handler: { (action: UIAlertAction!) in
+//            print("User pressed cancel on the alert.")
+//        }))
+//        
+//        presentViewController(cancelAlert, animated: true, completion: nil)
+//        
+//    }
     
     
     @IBAction func goingButtonAction(sender: UIButton) {
         
-        eventObject!.fetch()
+        //eventObject!.fetch()
         eventObject!.fetchIfNeeded()
         
         if let objectId:String = self.user!.objectId {
             let userName:String = self.user?["name"] as! String
             
-            if let goingPeople:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
+            if let _:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
                 // Add user to going list
                 eventObject!.objectForKey("dataSet")?.objectForKey("goingPeople")?.setObject(userName, forKey: objectId)
             }
             
             if let notGoingPeople:NSMutableDictionary = eventData["notGoingPeople"] as? NSMutableDictionary {
-                if let member:String = notGoingPeople[objectId] as? String {
+                if let _:String = notGoingPeople[objectId] as? String {
                     // user in not going list, remove them
                     eventObject!.objectForKey("dataSet")?.objectForKey("notGoingPeople")?.removeObjectForKey(objectId)
                     if (objectId != eventObject!.objectForKey("dataSet")?.objectForKey("eventCreator") as! String) {
@@ -307,7 +416,7 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             }
             
             if let invitedPeople:NSMutableDictionary = eventData["invitedPeople"] as? NSMutableDictionary {
-                if let member:String = invitedPeople[objectId] as? String {
+                if let _:String = invitedPeople[objectId] as? String {
                     // user in invited list, remove them
                     eventObject!.objectForKey("dataSet")?.objectForKey("invitedPeople")?.removeObjectForKey(objectId)
                     self.sendUserEventResponseNotification(true, eventObject: eventObject!, userName: userName, eventName: eventNameString)
@@ -328,14 +437,14 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     @IBAction func notGoingButtonAction(sender: AnyObject) {
         
-        eventObject!.fetch()
+        //eventObject!.fetch()
         eventObject!.fetchIfNeeded()
         
         if let objectId:String = self.user!.objectId {
             let userName:String = self.user?["name"] as! String
             
             if let goingPeople:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
-                if let member:String = goingPeople[objectId] as? String {
+                if let _:String = goingPeople[objectId] as? String {
                     // user in not going list, remove them
                     eventObject!.objectForKey("dataSet")?.objectForKey("goingPeople")?.removeObjectForKey(objectId)
                     if (objectId != eventObject!.objectForKey("dataSet")?.objectForKey("eventCreator") as! String) {
@@ -344,15 +453,15 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
                 }
             }
             
-            if let notGoingPeople:NSMutableDictionary = eventData["notGoingPeople"] as? NSMutableDictionary {
+            if let _:NSMutableDictionary = eventData["notGoingPeople"] as? NSMutableDictionary {
                 // Add user to not going list
                 eventObject!.objectForKey("dataSet")?.objectForKey("notGoingPeople")?.setObject(userName, forKey: objectId)
             }
             
             if let invitedPeople:NSMutableDictionary = eventData["invitedPeople"] as? NSMutableDictionary {
-                if let member:String = invitedPeople[objectId] as? String {
+                if let _:String = invitedPeople[objectId] as? String {
                     // user in invited list, remove them
-                    invitedPeople.removeObjectForKey(objectId)
+                    eventObject!.objectForKey("dataSet")?.objectForKey("invitedPeople")?.removeObjectForKey(objectId)
                     self.sendUserEventResponseNotification(false, eventObject: eventObject!, userName: userName, eventName: eventNameString)
                 }
             }
@@ -394,30 +503,44 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     // BLAST FUNCTION
     // Actually should be called event blast invited people
-    @IBAction func blastPeople(sender: UIBarButtonItem) {
+    @IBAction func blastPeople(sender: AnyObject) {
         
-        let username:String = self.user?["name"] as! String
-        let eventName:String = eventData["eventName"] as! String
+        let blastAlert = UIAlertController(title: "Send reminder?", message: "Would you like to send an event reminder to friends who haven't responded yet?", preferredStyle: UIAlertControllerStyle.Alert)
         
-        if let invitedPeople:NSMutableDictionary = eventData["invitedPeople"] as? NSMutableDictionary {
-            let users:[AnyObject] = invitedPeople.allKeys
+        
+        blastAlert.addAction(UIAlertAction(title: "Yes", style: .Default, handler: { (action: UIAlertAction!) in
             
-            // Send push notification to people who were just invited to event
-            let pushQuery = PFInstallation.query()
-            pushQuery?.whereKey("userId", containedIn: users)
-            let push = PFPush()
-            push.setQuery(pushQuery)
-            push.setMessage(username + " is reminding you to respond to " + eventName)
-            push.sendPushInBackground()
-        }
         
-        let alert = UIAlertController(title:"Blasted!", message: "Sent a reminder to respond to those who haven't.", preferredStyle: UIAlertControllerStyle.Alert)
-        alert.addAction(UIAlertAction(title:"Cool", style: .Default, handler: { action in
-            self.dismissViewControllerAnimated(true, completion:nil)
+            let username:String = self.user?["name"] as! String
+            let eventName:String = self.eventData["eventName"] as! String
             
+            if let invitedPeople:NSMutableDictionary = self.eventData["invitedPeople"] as? NSMutableDictionary {
+                let users:[AnyObject] = invitedPeople.allKeys
+                
+                // Send push notification to people who were just invited to event
+                let pushQuery = PFInstallation.query()
+                pushQuery?.whereKey("userId", containedIn: users)
+                let push = PFPush()
+                push.setQuery(pushQuery)
+                push.setMessage(username + " is reminding you to respond to " + eventName)
+                push.sendPushInBackground()
+            }
+            
+            let alert = UIAlertController(title:"Reminded!", message: "Sent an event reminder to friends who haven't responded yet!", preferredStyle: UIAlertControllerStyle.Alert)
+            alert.addAction(UIAlertAction(title:"Cool", style: .Default, handler: { action in
+                self.dismissViewControllerAnimated(true, completion:nil)
+                
+            }))
+            
+            self.presentViewController(alert, animated:true, completion:nil)
         }))
         
-        self.presentViewController(alert, animated:true, completion:nil)
+        // Cancel action
+        blastAlert.addAction(UIAlertAction(title: "No", style: .Default, handler: { (action: UIAlertAction!) in
+            print("User pressed no on the alert.")
+        }))
+        
+        self.presentViewController(blastAlert, animated:true, completion:nil)
     }
     
     
@@ -445,9 +568,7 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     
     
-    func textFieldDidChange(textField: UITextField) {
-        print("fieldchanged")
-        
+    func textFieldDidChange(textField: UITextField) {        
         
         if self.addCommentField.text == "" {
             self.commentButton.enabled = false
@@ -460,13 +581,14 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     }
     
     @IBAction func addCommentButton(sender: AnyObject) {
-        self.view.endEditing(true)
+        //self.view.endEditing(true)
         var error = ""
         
         if addCommentField.text == "" {
             error = "Please enter a comment!"
         } else {
-            
+            eventObject?.fetchIfNeeded()
+            eventData = eventObject!["dataSet"] as! NSMutableDictionary
             // Create a comment object with event id, the comment, creation time, user name
             // Save it to parse
             // Refresh the table
@@ -478,6 +600,26 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             comment["username"] = self.user?["name"]
             comment["facebookId"] = self.user?["facebookID"]
             comment.save()
+            
+            let users:NSMutableDictionary = self.eventData["invitedPeopleWithApp"] as! NSMutableDictionary
+            //Filter users. Only those that are invited and going with app get notifications
+            let usersArr:[AnyObject] = users.allKeys
+            var resultArr:[AnyObject] = self.filterCommentReceivers(usersArr as! [String])
+            
+            if (self.user?.objectId != self.eventData["eventCreator"] as? String) {
+                resultArr.append(self.eventData["eventCreator"] as! String)
+            }
+ 
+            
+            
+            let name:String = (self.user?["name"])! as! String
+            // Send push notification to people who were just invited to event
+            let pushQuery = PFInstallation.query()
+            pushQuery?.whereKey("userId", containedIn: resultArr)
+            let push = PFPush()
+            push.setQuery(pushQuery)
+            push.setMessage(name + " said: " + self.addCommentField.text!)
+            push.sendPushInBackground()
             
             self.refreshComments()
         }
@@ -497,9 +639,31 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
         self.commentButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Normal)
     }
     
+    
+    func filterCommentReceivers(usersArr: [String]) -> [AnyObject] {
+        var resultArr:[AnyObject] = []
+        let invitedPeople:NSMutableDictionary = (eventData["invitedPeople"] as? NSMutableDictionary)!
+        let goingPeople:NSMutableDictionary = (eventData["goingPeople"] as? NSMutableDictionary)!
+
+        for user in usersArr {
+            if (user == self.user?.objectId) {
+                continue
+            } else if (invitedPeople.objectForKey(user) != nil) {
+                resultArr.append(user)
+            } else if (goingPeople.objectForKey(user) != nil) {
+                resultArr.append(user)
+            }
+        }
+        
+        return resultArr
+    }
+    
     // Calls this function when the tap is recognized.
     func DismissKeyboard(){
-        view.endEditing(true)
+        //animateViewMoving(false, moveValue: keyboardFrame.CGRectValue().size.height)
+        self.addCommentField.resignFirstResponder()
+        //view.endEditing(true)
+        //animateViewMoving(false, moveValue: keyboardFrame.CGRectValue().size.height)
     }
     
     
@@ -514,7 +678,6 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             dispatch_async(dispatch_get_main_queue(), { () -> Void in
                 print("This is run on the main queue, after the previous code in outer block")
                 self.tableView.reloadData()
-                self.newRefreshControl.endRefreshing()
             })
         })
     }
@@ -545,6 +708,77 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     }
     
     
+    func getProfPicForName(username: String, box: String) -> UIImageView {
+        let contactPic:UIImage = UIImage(named: box)!
+        let fullNameArr = username.componentsSeparatedByString(" ")
+        var initials:String = ""
+        for char in fullNameArr[0].characters {
+            initials = initials + String(char)
+            break
+        }
+        if (fullNameArr.count > 1) {
+            for char in fullNameArr[1].characters {
+                initials = initials + String(char)
+                break
+            }
+        }
+        let newImage:UIImage = textToImage(initials, inImage: contactPic, atPoint: CGPointMake(40, 40))
+        
+        
+        
+        let profilePicView:UIImageView = UIImageView(image: newImage)
+        profilePicView.frame = CGRect(x: 15, y: 13, width: 40, height: 40)
+        profilePicView.layer.cornerRadius = profilePicView.frame.size.width / 2
+        profilePicView.clipsToBounds = true
+        
+        
+        return profilePicView
+    }
+    
+    
+    func textToImage(drawText: NSString, inImage: UIImage, atPoint:CGPoint)->UIImage{
+        
+        // Setup the font specific variables
+        let textColor: UIColor = UIColor.whiteColor()
+        let textFont: UIFont = UIFont(name: "HelveticaNeue-Light", size: 115)!
+        
+        //Setup the image context using the passed image.
+        UIGraphicsBeginImageContext(inImage.size)
+        
+        //Setups up the font attributes that will be later used to dictate how the text should be drawn
+        let textFontAttributes = [
+            NSFontAttributeName: textFont,
+            NSForegroundColorAttributeName: textColor,
+        ]
+        
+        let size:CGSize = drawText.sizeWithAttributes(textFontAttributes)
+        
+        
+        //Put the image into a rectangle as large as the original image.
+        inImage.drawInRect(CGRectMake(0, 0, inImage.size.width, inImage.size.height))
+        
+        // Creating a point within the space that is as bit as the image.
+        //let rect: CGRect = CGRectMake(0 + , atPoint.y, inImage.size.width, inImage.size.height)
+        
+        let textRect:CGRect = CGRectMake(CGFloat(0.0) + CGFloat(floorf(Float(inImage.size.width - size.width) / Float(2.0))),
+            CGFloat(Float(0) + floorf(Float(inImage.size.height - size.height) / Float(2.0))),
+            size.width,
+            size.height);
+        
+        //Now Draw the text into an image.
+        drawText.drawInRect(textRect, withAttributes: textFontAttributes)
+        
+        // Create a new image out of the images we have created
+        let newImage: UIImage = UIGraphicsGetImageFromCurrentImageContext()
+        
+        // End the context now that we have the image we need
+        UIGraphicsEndImageContext()
+        
+        //And pass it back up to the caller.
+        return newImage
+    }
+    
+    
     func refreshComments() {
         self.getCommentsList()
         self.tableView.reloadData()
@@ -565,8 +799,8 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             
             return image
             
-        } catch let error as NSError {
-            print("CAUGHT ERROR")
+        } catch {
+            print("Error getting profile pic")
         }
         
         return nil
@@ -598,15 +832,15 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
         
         if let invitedPeople:NSMutableDictionary = eventData["invitedPeople"] as? NSMutableDictionary {
-            invitedPeopleString = String(invitedPeople.count) + "\nInvited"
+            invitedPeopleString = String(invitedPeople.count)// + "\nInvited"
         }
         
         if let goingPeople:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
-            goingString = String(goingPeople.count) + "\nGoing"
+            goingString = String(goingPeople.count) //+ "\nGoing"
         }
         
         if let notGoingPeople:NSMutableDictionary = eventData["notGoingPeople"] as? NSMutableDictionary {
-            notGoingString = String(notGoingPeople.count) + "\nNot Going"
+            notGoingString = String(notGoingPeople.count) //+ "\nNot Going"
         }
         
         
@@ -614,18 +848,53 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             
             let cell = tableView.dequeueReusableCellWithIdentifier("EventDetailsCell", forIndexPath: indexPath) as! EventDetailsTableViewCell
             
+            
             cell.eventNameLabel.text = eventNameString
+        
             
-            cell.goingButton.setTitle(goingString, forState: UIControlState.Normal)
-            cell.goingButton.titleLabel?.textAlignment = NSTextAlignment.Center
+        
             
-            cell.notGoingButton.setTitle(notGoingString, forState: UIControlState.Normal)
-            cell.notGoingButton.titleLabel?.textAlignment = NSTextAlignment.Center
             
-            cell.invitedPeopleButton.setTitle(invitedPeopleString, forState: UIControlState.Normal)
-            cell.invitedPeopleButton.titleLabel?.textAlignment = NSTextAlignment.Center
+            let goingButtonView:UIImageView = self.getProfPicForName(goingString, box: "greenbox.png")
+            cell.numGoingImage.image = goingButtonView.image
+            cell.numGoingImage.layer.cornerRadius = cell.numGoingImage.frame.size.width / 2
+            cell.numGoingImage.clipsToBounds = true
             
-            cell.eventCreatorLabel.text = "Hosted by " + eventCreatorString
+            let goingButton:UIButton = UIButton.init(frame: CGRectMake(cell.numGoingImage.frame.origin.x, cell.numGoingImage.frame.origin.y, cell.numGoingImage.frame.size.width, cell.numGoingImage.frame.size.height))
+            goingButton.backgroundColor = UIColor.clearColor();
+            goingButton.showsTouchWhenHighlighted = true;
+            goingButton.addTarget(self, action: "checkPeopleGoing:", forControlEvents: UIControlEvents.TouchUpInside)
+            cell.addSubview(goingButton)
+            
+//            cell.notGoingButton.setTitle(notGoingString, forState: UIControlState.Normal)
+//            cell.notGoingButton.titleLabel?.textAlignment = NSTextAlignment.Center
+            
+            let notGoingButtonView:UIImageView = self.getProfPicForName(notGoingString, box: "redbox.png")
+            cell.numNotGoingImage.image = notGoingButtonView.image
+            cell.numNotGoingImage.layer.cornerRadius = cell.numNotGoingImage.frame.size.width / 2
+            cell.numNotGoingImage.clipsToBounds = true
+            
+            let notGoingButton:UIButton = UIButton.init(frame: CGRectMake(cell.numNotGoingImage.frame.origin.x, cell.numNotGoingImage.frame.origin.y, cell.numNotGoingImage.frame.size.width, cell.numNotGoingImage.frame.size.height))
+            notGoingButton.backgroundColor = UIColor.clearColor();
+            notGoingButton.showsTouchWhenHighlighted = true;
+            notGoingButton.addTarget(self, action: "checkPeopleNotGoing:", forControlEvents: UIControlEvents.TouchUpInside)
+            cell.addSubview(notGoingButton)
+            
+//            cell.invitedPeopleButton.setTitle(invitedPeopleString, forState: UIControlState.Normal)
+//            cell.invitedPeopleButton.titleLabel?.textAlignment = NSTextAlignment.Center
+            
+            let invitedButtonView:UIImageView = self.getProfPicForName(invitedPeopleString, box: "orangebox.png")
+            cell.numInvitedImage.image = invitedButtonView.image
+            cell.numInvitedImage.layer.cornerRadius = cell.numInvitedImage.frame.size.width / 2
+            cell.numInvitedImage.clipsToBounds = true
+            
+            let invitedButton:UIButton = UIButton.init(frame: CGRectMake(cell.numInvitedImage.frame.origin.x, cell.numInvitedImage.frame.origin.y, cell.numInvitedImage.frame.size.width, cell.numInvitedImage.frame.size.height))
+            invitedButton.backgroundColor = UIColor.clearColor();
+            invitedButton.showsTouchWhenHighlighted = true;
+            invitedButton.addTarget(self, action: "checkPeopleInvited:", forControlEvents: UIControlEvents.TouchUpInside)
+            cell.addSubview(invitedButton)
+            
+            cell.eventCreatorLabel.text = "Created by " + eventCreatorString
             
             
             
@@ -634,13 +903,13 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             
             var isUserGoing:Bool!
             var isUserNotGoing:Bool!
-            if let member:String = eventData["goingPeople"]?.objectForKey((self.user?.objectId)!) as? String {
+            if let _:String = eventData["goingPeople"]?.objectForKey((self.user?.objectId)!) as? String {
                 isUserGoing = true
             } else {
                 isUserGoing = false
             }
             
-            if let member:String = eventData["notGoingPeople"]?.objectForKey((self.user?.objectId)!) as? String {
+            if let _:String = eventData["notGoingPeople"]?.objectForKey((self.user?.objectId)!) as? String {
                 isUserNotGoing = true
             } else {
                 isUserNotGoing = false
@@ -651,43 +920,46 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             cell.goingResponseButton.selected = isUserGoing
             cell.notGoingResponseButton.selected = isUserNotGoing
             
+            cell.goingResponseButton.tintColor = UIColor(red:27.0/255.0, green: 69.0/255.0, blue: 191.0/255.0, alpha: 1.0)
+            cell.notGoingResponseButton.tintColor = UIColor(red:27.0/255.0, green: 69.0/255.0, blue: 191.0/255.0, alpha: 1.0)
+            
             // Customize appearance of cell
-            cell.backgroundColor = UIColor.whiteColor()
-            cell.alpha = 0.1
+            cell.backgroundColor = UIColor(red: 256.0/256.0, green: 256.0/256.0, blue: 256.0/256.0, alpha: 0.1)//UIColor.whiteColor()
+            //cell.alpha = 0.1
             cell.separatorInset = UIEdgeInsetsZero
             cell.preservesSuperviewLayoutMargins = false
             
             
+            let eventCancelled:Bool = (self.eventObject?.objectForKey("dataSet")?.objectForKey("eventCancelled") as! Bool)
+            
+            let eventCreator:String = eventData["eventCreator"] as! String
+            
+            cell.cancelledLabel.hidden = !eventCancelled
+            cell.goingResponseButton.hidden = eventCancelled
+            cell.notGoingResponseButton.hidden = eventCancelled
+            
+            
+            if (self.user?.objectId == eventCreator) {
+                cell.blastButton.hidden = eventCancelled
+                cell.blastButton.enabled = !eventCancelled
+            } else {
+                cell.blastButton.hidden = true
+                cell.blastButton.enabled = false
+            }
+            
+            
+
             
             return cell
         } else if (indexPath.section == 1) {
             let cell = tableView.dequeueReusableCellWithIdentifier("ResponseCell", forIndexPath: indexPath) as! ResponseTableViewCell
             
-            // Toggle the going/not going button highlight, check if user.objectID in going or notgoing list
-            let isUserAuthor:Bool = self.user?.objectId == self.eventObject?.objectForKey("dataSet")?.objectForKey("eventCreator") as? String
-            
-            
-            
-            
-            let eventCancelled:Bool = (self.eventObject?.objectForKey("dataSet")?.objectForKey("eventCancelled") as! Bool)
-            
-            cell.cancelEventButton.hidden = !isUserAuthor && eventCancelled
-            cell.cancelEventButton.enabled = isUserAuthor && !eventCancelled
-            cell.editEventButton.hidden = !isUserAuthor && eventCancelled
-            cell.editEventButton.enabled = isUserAuthor && !eventCancelled
-            
-            
-            
-            
-            // Moved from event details to here.
-            
             cell.timeLabel.text = timeString
             cell.endTimeLabel.text = endTimeString
             cell.locationButton.setTitle(locationString, forState: UIControlState.Normal)
+            cell.locationButton.tintColor = UIColor(red:27.0/255.0, green: 69.0/255.0, blue: 191.0/255.0, alpha: 1.0)
             
-            // Customize appearance of cell
-            cell.backgroundColor = UIColor.whiteColor()
-            cell.alpha = 0.1
+            cell.backgroundColor = UIColor(red: 256.0/256.0, green: 256.0/256.0, blue: 256.0/256.0, alpha: 0.1)
             cell.separatorInset = UIEdgeInsetsZero
             cell.preservesSuperviewLayoutMargins = false
             
@@ -697,6 +969,7 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             let cell = tableView.dequeueReusableCellWithIdentifier("CommentCell", forIndexPath: indexPath) as! CommentsTableViewCell
             let commentObject:PFObject = self.commentList[indexPath.row]
             
+            
             cell.message.text = commentObject["comment"] as? String
             cell.username.text = commentObject["username"] as? String
             let date:NSDate = commentObject.createdAt!
@@ -705,46 +978,69 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             let minutesFromNow:Double = currentDate.timeIntervalSinceDate(date) / 60.0
             
             if (minutesFromNow < 60.0) {
-                cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow)) + "m ago"
+                if (Int(minutesFromNow) == 1) {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow)) + " minute ago"
+                } else {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow)) + " minutes ago"
+                }
             } else if (minutesFromNow >= 60.0) {
-                cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/60.0)) + "h ago"
+                if (Int(minutesFromNow/60.0) == 1) {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/60.0)) + " hour ago"
+                } else {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/60.0)) + " hours ago"
+                }
             } else if (minutesFromNow >= 1440.0) {
-                cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/1440.0)) + "d ago"
+                if (Int(minutesFromNow/1440.0) == 1) {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/1440.0)) + " day ago"
+                } else {
+                    cell.time.text = String(stringInterpolationSegment: Int(minutesFromNow/1440.0)) + " days ago"
+                }
             }
             
             
             
             // Customize appearance of cell
-            cell.backgroundColor = UIColor.whiteColor()
-            cell.alpha = 0.1
+            //cell.backgroundColor = UIColor.whiteColor()
+            //cell.alpha = 0.1
+            
+            cell.backgroundColor = UIColor(red: 256.0/256.0, green: 256.0/256.0, blue: 256.0/256.0, alpha: 0.1)
             cell.separatorInset = UIEdgeInsetsZero
             cell.preservesSuperviewLayoutMargins = false
 
             
             if (self.profilePicMap.objectForKey(commentObject["userId"]!) != nil) {
-
                 
                 let pic = self.profilePicMap.objectForKey(commentObject["userId"]!) as! UIImageView
 
                 cell.profilePic.image = pic.image
-                cell.profilePic.frame = CGRect(x: 15, y: 30, width: 30, height: 30)
+                //cell.profilePic.frame = CGRect(x: 15, y: 30, width: 30, height: 30)
                 cell.profilePic.layer.cornerRadius = cell.profilePic.frame.size.width / 2
                 cell.profilePic.clipsToBounds = true
             }
             
+            let border2 = CALayer()
+            let width2 = CGFloat(2.0)
+            border2.borderColor = UIColor(red: 235.0/256.0, green: 235.0/256.0, blue: 235.0/256.0, alpha: 1.0).CGColor
+            border2.frame = CGRect(x: 0, y: 0, width: cell.frame.size.width, height: 1)
+            
+            border2.borderWidth = width2
+            
+            cell.layer.addSublayer(border2)
+
             
             return cell
         }
 
     }
     
+    
     func tableView(tableView: UITableView, heightForRowAtIndexPath indexPath: NSIndexPath) -> CGFloat {
         if (indexPath.section == 0) {
-            return 175
+            return 225
         } else if (indexPath.section == 1) {
-            return 115
+            return 95
         } else {
-            return 90
+            return UITableViewAutomaticDimension//100
         }
     }
     
@@ -779,16 +1075,18 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
     
     
     func tableView(tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
-        let border = UIView(frame: CGRectMake(0,0,self.view.bounds.width,1))
-        border.backgroundColor = UIColor(red: 187.0/256.0, green: 187.0/256.0, blue: 187.0/256.0, alpha: 1.0)
+        //let border = UIView(frame: CGRectMake(0,0,self.view.bounds.width,1))
+        //border.backgroundColor = UIColor(red: 187.0/256.0, green: 187.0/256.0, blue: 187.0/256.0, alpha: 1.0)
         
         
         let header: UITableViewHeaderFooterView = view as! UITableViewHeaderFooterView
         header.contentView.backgroundColor = UIColor(red: 230.0/256.0, green: 230.0/256.0, blue: 230.0/256.0, alpha: 1.0)
-        header.textLabel!.font = UIFont(name: "Futura", size: 14)!
+        header.textLabel!.font = UIFont(name: "HelveticaNeue-Light", size: 14)!
         header.textLabel!.textColor = UIColor(red: 107.0/256.0, green: 107.0/256.0, blue: 107.0/256.0, alpha: 1.0)
+        //header.textLabel!.textColor = UIColor(red: 28.0/255.0, green: 50.0/255.0, blue: 115.0/255.0, alpha: 1.0)
         header.alpha = 1.0 //make the header transparent
-        header.addSubview(border)
+        header.textLabel?.textAlignment = NSTextAlignment.Center
+        //header.addSubview(border)
     }
 
     
@@ -805,18 +1103,21 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
             if let goingPeople:NSMutableDictionary = eventData["goingPeople"] as? NSMutableDictionary {
                 let goingPeopleView:GoingPeopleTableViewController = segue.destinationViewController as! GoingPeopleTableViewController
                 goingPeopleView.goingPeople = goingPeople
+                goingPeopleView.friendToFacebookIds = eventData["friendToFacebookIDs"] as! NSMutableDictionary
             }
         } else if (segue.identifier == "notGoingSegue") {
             // Get Data
             if let notGoingPeople:NSMutableDictionary = eventData["notGoingPeople"] as? NSMutableDictionary {
                 let notGoingPeopleView:NotGoingTableViewController = segue.destinationViewController as! NotGoingTableViewController
                 notGoingPeopleView.notGoingPeople = notGoingPeople
+                notGoingPeopleView.friendToFacebookIds = eventData["friendToFacebookIDs"] as! NSMutableDictionary
             }
         } else if (segue.identifier == "invitedPeopleSegue") {
             // Get Data
             if let invitedPeople:NSMutableDictionary = eventData["invitedPeople"] as? NSMutableDictionary {
                 let invitedPeopleView:InvitedPeopleTableViewController = segue.destinationViewController as! InvitedPeopleTableViewController
                 invitedPeopleView.invitedPeople = invitedPeople
+                invitedPeopleView.friendToFacebookIds = eventData["friendToFacebookIDs"] as! NSMutableDictionary
             }
         } else if (segue.identifier == "EditEvent") {
             let editEventView:AddViewController = segue.destinationViewController as! AddViewController
@@ -831,33 +1132,88 @@ class EventDetailsViewController: UIViewController, UITableViewDelegate, UITable
         self.performSegueWithIdentifier("EditEvent", sender: self)
     }
     
-    func keyboardWillShow(sender: NSNotification) {
-        if let userInfo = sender.userInfo {
-            if let keyboardHeight = userInfo[UIKeyboardFrameEndUserInfoKey] as? NSValue {
-                self.keyboardFrame = keyboardHeight
-                self.animateViewMoving(true, moveValue: keyboardHeight.CGRectValue().size.height)
-            }
+    
+    func keyboardWillShow(notification:NSNotification) {
+        print("Show")
+        self.keyboardShown = true
+        adjustingHeight(true, notification: notification)
+    }
+    
+    func keyboardWillHide(notification:NSNotification) {
+        print("Hide")
+        
+        if (self.keyboardShown) {
+            adjustingHeight(false, notification: notification)
         }
+        self.keyboardShown = false
+    }
+    
+    func adjustingHeight(show:Bool, notification:NSNotification) {
+        // 1
+        var userInfo = notification.userInfo!
+        // 2
+        let keyboardFrame:CGRect = (userInfo[UIKeyboardFrameBeginUserInfoKey] as! NSValue).CGRectValue()
+        // 3
+        let animationDurarion = userInfo[UIKeyboardAnimationDurationUserInfoKey] as! NSTimeInterval
+        // 4
+        let changeInHeight = (CGRectGetHeight(keyboardFrame)) * (show ? 1 : -1)
+        //5
+        UIView.animateWithDuration(animationDurarion, animations: { () -> Void in
+            self.view.frame = CGRectOffset(self.view.frame, 0,  -1 * changeInHeight)
+          
+        })
+        
     }
     
     
+    
+    func textFieldShouldReturn(textField: UITextField) -> Bool {
+        //textField.resignFirstResponder()
+        //adjustingHeight(false, notification: notification)
+        
+        //self.navigationItem.leftBarButtonItem?.enabled = true
+        return true
+    }
+    
+    
+    /**
+     * Called when the user click on the view (outside the UITextField).
+     */
+    override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
+        
+        //self.view.endEditing(true)
+        //self.navigationItem.leftBarButtonItem?.enabled = true
+    }
+    
+
     
     
     
     func textFieldDidBeginEditing(textField: UITextField) {
         //let frame = (notification.userInfo[UIKeyboardFrameEndUserInfoKey] as NSValue).CGRectValue()
         //animateViewMoving(true, moveValue: 225)
-    }
-    func textFieldDidEndEditing(textField: UITextField) {
-        animateViewMoving(false, moveValue: keyboardFrame.CGRectValue().size.height)
+        //self.animateViewMoving(true, moveValue: keyboardFrame.CGRectValue().size.height)
     }
     
+    func textFieldDidEndEditing(textField: UITextField) {
+        //print(self.view.frame.origin.y)
+        if (!self.viewAppeared) {
+            //animateViewMoving(false, moveValue: keyboardFrame.CGRectValue().size.height)
+        }
+    }
+    
+    override func viewWillDisappear(animated: Bool) {
+        NSNotificationCenter.defaultCenter().removeObserver(self, name: UIKeyboardWillShowNotification, object: nil)
+        NSNotificationCenter.defaultCenter().removeObserver(self, name: UIKeyboardWillHideNotification, object: nil)
+    }
+    
+    
     func animateViewMoving (up:Bool, moveValue :CGFloat){
-        let movementDuration:NSTimeInterval = 0.3
-        let movement:CGFloat = ( up ? -moveValue : moveValue)
-        UIView.beginAnimations( "animateView", context: nil)
+        let movementDuration:NSTimeInterval = 0.39
+        let movement:CGFloat = (up ? -moveValue : moveValue)
+        UIView.beginAnimations("animateView", context: nil)
         UIView.setAnimationBeginsFromCurrentState(true)
-        UIView.setAnimationDuration(movementDuration )
+        UIView.setAnimationDuration(movementDuration)
         self.view.frame = CGRectOffset(self.view.frame, 0,  movement)
         UIView.commitAnimations()
     }

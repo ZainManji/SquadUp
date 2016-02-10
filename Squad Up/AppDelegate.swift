@@ -8,6 +8,7 @@
 
 import UIKit
 import CoreData
+import GoogleMaps
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -16,13 +17,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     
 
     func application(application: UIApplication, didFinishLaunchingWithOptions launchOptions: [NSObject: AnyObject]?) -> Bool {
-        // Override point for customization after application launch.
+        GMSServices.provideAPIKey("AIzaSyB4cujh7VlONfvQ4OfbktujRVDSGn-oomI")
         
-        // Customize UINavigationBar
-        UINavigationBar.appearance().barTintColor = UIColor(red: 255.0/255.0, green: 67.0/255.0, blue: 6.0/255.0, alpha: 1.0)
+        UIApplication.sharedApplication().statusBarStyle = .LightContent
+        UINavigationBar.appearance().barTintColor = UIColor(red: 28.0/255.0, green: 50.0/255.0, blue: 115.0/255.0, alpha: 1.0)
         UINavigationBar.appearance().tintColor = UIColor.whiteColor()
         UINavigationBar.appearance().hidden = true
-                
+        
+        UINavigationBar.appearance().titleTextAttributes = [
+            NSFontAttributeName: UIFont(name: "HelveticaNeue-Light", size: 18)!,
+            NSForegroundColorAttributeName : UIColor.whiteColor()
+        ]
+        
         // Set up Parse and Facebook LogIn
         Parse.setApplicationId("dPtAxlstfJUlKHk361sWEXOOvmX4OLYkBLWhKS61", clientKey:"U0qk5L4NW28eHvQnhE56jMBDCs8JaDnuTV5i7tuJ")
         PFAnalytics.trackAppOpenedWithLaunchOptionsInBackground(launchOptions, block: nil)
@@ -34,6 +40,37 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         application.registerUserNotificationSettings(settings)
         application.registerForRemoteNotifications()
         
+        let pageController = UIPageControl.appearance()
+        pageController.pageIndicatorTintColor = UIColor.lightGrayColor()
+        pageController.currentPageIndicatorTintColor = UIColor.whiteColor()
+        pageController.backgroundColor = UIColor.clearColor()
+        
+        
+        // get your storyboard
+        let storyboard = UIStoryboard(name: "Storyboard", bundle: nil)
+        
+        // instantiate your desired ViewController
+        let rootController = storyboard.instantiateViewControllerWithIdentifier("SquadUpHomeNav")
+        let logInController = storyboard.instantiateViewControllerWithIdentifier("LogInScreen") //as? CustomLogInViewController
+        
+        //Testing purposes
+        //let rootController = storyboard.instantiateViewControllerWithIdentifier("FirstPageViewController")
+        
+        
+        let currentUser = PFUser.currentUser()
+        
+        if currentUser != nil {
+            print("CUrrent user is not null!")
+            if self.window != nil {
+                self.window?.rootViewController = rootController
+            }
+        } else {
+            print("current user is null :(")
+            if self.window != nil {
+                self.window?.rootViewController = logInController
+            }
+        }
+
         return true
     }
     

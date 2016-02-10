@@ -10,8 +10,11 @@ import UIKit
 import EventKit
 import MessageUI
 import Contacts
+import AddressBook
+import DGElasticPullToRefresh
 
-class EventInviteFriendsTableViewController: UITableViewController,  MFMessageComposeViewControllerDelegate, UISearchBarDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDataSource {
+
+class EventInviteFriendsTableViewController: UITableViewController, MFMessageComposeViewControllerDelegate, UISearchBarDelegate, UICollectionViewDelegateFlowLayout, UICollectionViewDataSource {
     
     @IBOutlet var searchBar: UISearchBar!
     
@@ -48,14 +51,16 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     var user:PFUser?
     var actInd: UIActivityIndicatorView = UIActivityIndicatorView(frame: CGRectMake(0, 0, 150, 150)) as UIActivityIndicatorView
-    var newRefreshControl:UIRefreshControl!
+    var newRefreshControl:UIRefreshControl = UIRefreshControl()
     var viewLoaded: Bool = false
     
     var tableViewFooter:UIView!
     var footerCollectionView: UICollectionView!
+    var noneSelectedLabel:UILabel!
     
     var profilePicDict:NSMutableDictionary = NSMutableDictionary()
     
+    var getNewUserObjects:Bool = false
     
     
     
@@ -76,9 +81,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     override func viewDidAppear(animated: Bool) {
         super.viewDidAppear(animated)
-        
 
-        
         // Customize back button
         let myBackButton:UIButton = UIButton(type: UIButtonType.Custom)
         myBackButton.addTarget(self, action: "popDisplay:", forControlEvents: UIControlEvents.TouchUpInside)
@@ -91,26 +94,79 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         
         self.tableView.reloadData()
         self.footerCollectionView.reloadData()
-    }
-    
-    
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
         
-        self.tableViewFooter.frame = CGRect(x: 0, y: self.tableView.frame.height - 45.0 + self.tableView.contentOffset.y, width: self.tableView.frame.width, height: 45)
     }
+    
+    
     
     
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        searchBar.delegate = self
+        self.title = "Invite Friends"
+        
+        self.searchBar.delegate = self
+        
+        self.view.backgroundColor = UIColor(red: 230.0/255.0, green: 230.0/255.0, blue: 230.0/255.0, alpha: 1.0)
 
-        self.newRefreshControl = UIRefreshControl()
-        self.newRefreshControl.attributedTitle = NSAttributedString(string: "Pull to refresh")
-        self.newRefreshControl.addTarget(self, action: "refreshPage:", forControlEvents: UIControlEvents.ValueChanged)
-        self.tableView.addSubview(newRefreshControl)
+        
+        // Initialize refresh
+        let loadingView = DGElasticPullToRefreshLoadingViewCircle()
+        loadingView.tintColor = UIColor(red: 78/255.0, green: 221/255.0, blue: 200/255.0, alpha: 1.0)
+        tableView.dg_addPullToRefreshWithActionHandler({ [weak self] () -> Void in
+            // Add your logic here
+            // Do not forget to call dg_stopLoading() at the end
+            self!.actInd.startAnimating()
+            
+            
+            self!.viewLoaded = false
+            
+            let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+            UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+            
+            self!.tableView.userInteractionEnabled = false
+            
+            let qualityOfServiceClass = QOS_CLASS_BACKGROUND
+            let backgroundQueue = dispatch_get_global_queue(qualityOfServiceClass, 0)
+    
+            dispatch_async(backgroundQueue, {
+                print("This is run on the background queue")
+                UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+                
+                
+                self!.getUserObjectsForContacts()
+                userDefaults.synchronize()
+                
+                
+                
+                dispatch_async(dispatch_get_main_queue(), { () -> Void in
+                    print("This is run on the main queue, after the previous code in outer block")
+                    
+                    self!.resetFilteredFriendsArray()
+    
+                    self!.tableView.userInteractionEnabled = true
+                    self!.navigationItem.rightBarButtonItem?.enabled = true
+                    self!.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
+                    
+                    self!.viewLoaded = true
+                    
+                    UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+                    //self!.actInd.stopAnimating()
+                    self!.tableView.dg_stopLoading()
+                })
+            })
+
+
+            
+            
+
+            
+            }, loadingView: loadingView)
+        tableView.dg_setPullToRefreshFillColor(UIColor(red: 57/255.0, green: 67/255.0, blue: 89/255.0, alpha: 1.0))
+        tableView.dg_setPullToRefreshBackgroundColor(tableView.backgroundColor!)
+        
+        ///
         
         self.verifyUserEventAuthorization()
         
@@ -120,16 +176,9 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         
         // Create top border for comment button section
         let upperBorder:CALayer = CALayer();
-        upperBorder.backgroundColor = UIColor.redColor().CGColor;
+        upperBorder.backgroundColor = UIColor(red: 28.0/255.0, green: 50.0/255.0, blue: 115.0/255.0, alpha: 1.0).CGColor;
         upperBorder.frame = CGRectMake(0, 0, self.tableView.frame.width, 1.0);
         
-        
-//        let inviteButton = UIButton(type: UIButtonType.System) as UIButton
-//        inviteButton.frame = CGRectMake(self.tableView.frame.width - 50, 0, 50, 50)
-//        inviteButton.backgroundColor = UIColor.whiteColor()
-//        inviteButton.setTitle("Invite", forState: UIControlState.Normal)
-//        inviteButton.titleLabel!.font = UIFont(name: "Avenir", size: 17)
-//        inviteButton.addTarget(self, action: "sendInvitesAction:", forControlEvents: UIControlEvents.TouchUpInside)
         
         let layout: UICollectionViewFlowLayout = UICollectionViewFlowLayout()
         layout.sectionInset = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
@@ -142,22 +191,28 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         self.footerCollectionView.registerClass(UICollectionViewCell.self, forCellWithReuseIdentifier: "Cell")
         self.footerCollectionView.backgroundColor = UIColor.whiteColor()
         
+        noneSelectedLabel = UILabel(frame: CGRectMake(0, 0, self.footerCollectionView.frame.width, self.footerCollectionView.frame.height))
+        noneSelectedLabel.center = CGPointMake(self.footerCollectionView.frame.width / 2, self.footerCollectionView.frame.height / 2)
+        noneSelectedLabel.textAlignment = NSTextAlignment.Center
+        noneSelectedLabel.text = "No friends selected yet"
+        noneSelectedLabel.textColor = UIColor(red: 43.0/256.0, green: 69.0/256.0, blue: 86.0/256.0, alpha: 1.0)
+        noneSelectedLabel.font = UIFont(name: "HelveticaNeue-Light", size: 18)
         
-        self.tableViewFooter = UIView(frame: CGRect(x: 0, y: self.tableView.frame.height - 45.0, width: self.tableView.frame.width, height: 45))        
+        self.footerCollectionView.addSubview(noneSelectedLabel)
         
-        //self.tableViewFooter.addSubview(inviteButton)
+        self.tableViewFooter = UIView(frame: CGRect(x: 0, y: self.tableView.frame.height - 45.0, width: self.tableView.frame.width, height: 45))
         self.tableViewFooter.addSubview(self.footerCollectionView)
         self.tableViewFooter.layer.addSublayer(upperBorder)
+        self.tableViewFooter.layer.zPosition = 1
+        
         self.tableView.addSubview(self.tableViewFooter)
-        
-        
-
         
         // Customize back button
         let myBackButton:UIButton = UIButton(type: UIButtonType.Custom)
         myBackButton.addTarget(self, action: "popDisplay:", forControlEvents: UIControlEvents.TouchUpInside)
         myBackButton.setTitle("Back", forState: UIControlState.Normal)
         myBackButton.setTitleColor(UIColor.whiteColor(), forState: UIControlState.Normal)
+        myBackButton.setTitleColor(UIColor.grayColor(), forState: UIControlState.Highlighted)
         myBackButton.sizeToFit()
         let myCustomBackButtonItem:UIBarButtonItem = UIBarButtonItem(customView: myBackButton)
         self.navigationItem.leftBarButtonItem  = myCustomBackButtonItem
@@ -165,7 +220,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         self.actInd.center = self.view.center
         self.actInd.hidesWhenStopped = true
         self.actInd.activityIndicatorViewStyle = UIActivityIndicatorViewStyle.Gray
-        view.addSubview(self.actInd)
+        self.tableView.addSubview(self.actInd)
         
         self.tableView.allowsMultipleSelection = false
         self.clearsSelectionOnViewWillAppear = false;
@@ -181,39 +236,99 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
 
         let qualityOfServiceClass = QOS_CLASS_BACKGROUND
         let backgroundQueue = dispatch_get_global_queue(qualityOfServiceClass, 0)
-        var fetchedPeople:Bool = userDefaults.objectForKey("fetchedPeople") as! Bool
-        let loggedOutBool:Bool = userDefaults.objectForKey("loggedOut") as! Bool
         self.tableView.userInteractionEnabled = false
+        self.navigationItem.rightBarButtonItem?.enabled = false
         
-        dispatch_async(backgroundQueue, {
-            print("This is run on the background queue")
-            
-            if (!fetchedPeople || loggedOutBool) {
-                print("Getting user objects for contacts since it's the first time accessing this page ever.")
-                self.actInd.startAnimating()
-                self.getUserObjectsForContacts()
-            }
-            
-            dispatch_async(dispatch_get_main_queue(), { () -> Void in
-                print("This is run on the main queue, after the previous code in outer block")
-                
-                self.actInd.stopAnimating()
-                fetchedPeople = true
-                userDefaults.setObject(true, forKey: "fetchedPeople")
-                userDefaults.setObject(false, forKey: "loggedOut")
-                userDefaults.synchronize()
-                
-                self.resetFilteredFriendsArray()
-                self.tableView.userInteractionEnabled = true
-                //self.viewLoaded = true
-                self.navigationItem.rightBarButtonItem?.enabled = true
-                self.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
+        
+//        
+//        self.getNewUserObjects = false
+//        if let fbid = userDefaults.objectForKey("friendToFacebookID") as? NSMutableDictionary {
+//            self.friendToFacebookID = fbid
+//        } else {
+//            getNewUserObjects = true
+//        }
+//        
+//        if let withApp = userDefaults.objectForKey("friendsWithApp") as? NSMutableDictionary {
+//            self.friendsWithApp = withApp
+//        } else {
+//            getNewUserObjects = true
+//        }
+//        
+//        if let withoutApp = userDefaults.objectForKey("friendsWithoutApp") as? NSMutableDictionary {
+//            self.friendsWithoutApp = withoutApp
+//        } else {
+//            getNewUserObjects = true
+//        }
+//        
+//        if let index = userDefaults.objectForKey("indexApp") as? NSMutableDictionary {
+//            self.indexApp = index
+//        } else {
+//            getNewUserObjects = true
+//        }
+//        
+//        if let indexNoApp = userDefaults.objectForKey("indexWithoutApp") as? NSMutableDictionary {
+//            self.indexWithoutApp = indexNoApp
+//        } else {
+//            getNewUserObjects = true
+//        }
 
-            })
-        })
+
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+        
+        //if (self.getNewUserObjects) {
+        //self.getUserObjectsForContacts()
+        //}
+        
+        //let qualityOfServiceClass = QOS_CLASS_BACKGROUND
+        //let backgroundQueue = dispatch_get_global_queue(qualityOfServiceClass, 0)
+        
+//        dispatch_async(backgroundQueue, {
+//            print("This is run on the background queue")
+//            UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+//            
+//            self.getUserObjectsForContacts()
+//            userDefaults.synchronize()
+//            
+//            
+//            
+//            dispatch_async(dispatch_get_main_queue(), { () -> Void in
+//                print("This is run on the main queue, after the previous code in outer block")
+//                
+//                self.resetFilteredFriendsArray()
+//                
+//                self.tableView.userInteractionEnabled = true
+//                self.navigationItem.rightBarButtonItem?.enabled = true
+//                self.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
+//                
+//                self.viewLoaded = true
+//                
+//                UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+//            })
+//        })
+
+        //self.actInd.stopAnimating()
+        //UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+        userDefaults.synchronize()
+        
+        //self.resetFilteredFriendsArray()
         
         
-        // 
+        //self.actInd.stopAnimating()
+        
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+        self.actInd.startAnimating()
+        self.getUserObjectsForContacts()
+        self.resetFilteredFriendsArray()
+        
+        
+        self.tableView.userInteractionEnabled = true
+        self.navigationItem.rightBarButtonItem?.enabled = true
+        self.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
+        //self.actInd.stopAnimating()
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+
+        
+        // Check if user is editing the event
         if (self.editingEvent == nil) {
             self.editingEvent = false
         }
@@ -239,7 +354,53 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             self.prevInvitedPeopleWithoutApp = NSMutableDictionary()
         }
         
+        if (self.invitedPeople.allKeys.count > 0) {
+            noneSelectedLabel.text = ""
+        }
+        
+        
+        // Get Contact List
+        let authorizationStatus = ABAddressBookGetAuthorizationStatus()
+        
+        switch authorizationStatus {
+        case .Denied, .Restricted:
+            print("Get Contact List Denied/Restricted")
+            
+            // Set phone contacts to an empty dictionary since we don't have permission
+            let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+            let contacts:NSMutableDictionary = NSMutableDictionary()
+            userDefaults.setObject(contacts, forKey: "phoneContacts")
+            userDefaults.synchronize()
+        case .Authorized:
+            print("Get Contact List Authorized")
+            promptForAddressBookRequestAccess()
+        case .NotDetermined:
+            print("Get Contact List Not Determined")
+            promptForAddressBookRequestAccess()
+        }
+        
+        //self.view.addSubview(self.actInd)
+        
     }
+    
+    
+    
+    deinit {
+        tableView.dg_removePullToRefresh()
+    }
+    
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        self.tableViewFooter.frame = CGRect(x: 0, y: self.tableView.frame.height - 45.0 + self.tableView.contentOffset.y, width: self.tableView.frame.width, height: 45)
+        
+        
+
+    }
+    
+    
+    
     
     
     func collectionView(collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -251,14 +412,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         
         var index = -1
         let friendId:String = self.invitedPeople.allKeys[indexPath.item] as! String
-        print(invitedPeople)
+        
+
         
         if (self.friendObjectsAppIndex.objectForKey(friendId) != nil) {
-            print(friendId)
             index = self.friendObjectsAppIndex.objectForKey(friendId) as! Int
             cell.backgroundView = UIView()
             let temp:UIImageView = UIImageView(image: self.friendsWithAppArray[index].profilePicView.image)
-            temp.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
+            
+            temp.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
             temp.layer.cornerRadius = temp.frame.size.width / 2
             temp.clipsToBounds = true
             cell.backgroundView!.addSubview(temp)
@@ -266,9 +428,34 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             index = self.friendObjectsWithoutAppIndex.objectForKey(friendId) as! Int
             cell.backgroundView = UIView()
             let temp:UIImageView = UIImageView(image: self.friendsWithoutAppArray[index].profilePicView.image)
-            temp.frame = CGRect(x: 0, y: 0, width: 25, height: 25)
+            
+            let name:String = self.friendsWithoutAppArray[index].name
+            let fullNameArr = name.componentsSeparatedByString(" ")
+            var initials:String = ""
+            for char in fullNameArr[0].characters {
+                initials = initials + String(char)
+                break
+            }
+            if (fullNameArr.count > 1) {
+                for char in fullNameArr[1].characters {
+                    initials = initials + String(char)
+                    break
+                }
+            }
+            
+            
+            
+            temp.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
             temp.layer.cornerRadius = temp.frame.size.width / 2
             temp.clipsToBounds = true
+            
+            let label = UILabel(frame: CGRectMake(0, 0, temp.frame.width, temp.frame.height))
+            label.center = CGPointMake(temp.frame.width / 2, temp.frame.height / 2)
+            label.textAlignment = NSTextAlignment.Center
+            label.text = initials
+            label.textColor = UIColor.whiteColor()
+            label.font = UIFont(name: "HelveticaNeue-Light", size: 10)
+            
             cell.backgroundView!.addSubview(temp)
         }
         
@@ -282,13 +469,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     override func scrollViewDidScroll(scrollView: UIScrollView) {
 
         self.tableViewFooter.frame = CGRect(x: 0, y: self.tableView.frame.height - 45.0 + self.tableView.contentOffset.y, width: self.tableView.frame.width, height: 45)
+        
+        
     }
 
     
     
     func resetFilteredFriendsArray() {
-        self.navigationItem.rightBarButtonItem?.enabled = false
-        self.navigationItem.rightBarButtonItem?.tintColor = UIColor.grayColor()
+        self.actInd.startAnimating()
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
         self.viewLoaded = false
         let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
         
@@ -341,9 +530,9 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             var profilePicView:UIImageView!
             
             if let fbid = self.friendToFacebookID.objectForKey(id as! String) as? String {
-                let profilePic:UIImage = self.getProfPic(fbid)!
+                let profilePic:UIImage = self.getProfPic(fbid, name: value as! String)!
                 profilePicView = UIImageView(image: profilePic)
-                profilePicView.frame = CGRect(x: 15, y: 15, width: 40, height: 40)
+                profilePicView.frame = CGRect(x: 15, y: 13, width: 40, height: 40)
                 profilePicView.layer.cornerRadius = profilePicView.frame.size.width / 2
                 profilePicView.clipsToBounds = true
             } else {
@@ -376,12 +565,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         
         self.tableView.reloadData()
         self.footerCollectionView.reloadData()
+        //self.actInd.stopAnimating()
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = false
         
     }
     
 
     func DismissKeyboard(){
         view.endEditing(true)
+        //self.searchBar.resignFirstResponder()
     }
     
     
@@ -400,10 +592,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             }
         }
         let newImage:UIImage = textToImage(initials, inImage: contactPic, atPoint: CGPointMake(35, 45))
+        
+        
+        
         let profilePicView:UIImageView = UIImageView(image: newImage)
-        profilePicView.frame = CGRect(x: 15, y: 15, width: 40, height: 40)
+        profilePicView.frame = CGRect(x: 15, y: 13, width: 40, height: 40)
         profilePicView.layer.cornerRadius = profilePicView.frame.size.width / 2
         profilePicView.clipsToBounds = true
+        
+        
         return profilePicView
     }
     
@@ -463,48 +660,42 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
 
     
-    // Refresh the page - load the friends again
-    func refreshPage(sender:AnyObject) {
-        self.viewLoaded = false
-
-        let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
-        let qualityOfServiceClass = QOS_CLASS_BACKGROUND
-        let backgroundQueue = dispatch_get_global_queue(qualityOfServiceClass, 0)
-        var fetchedPeople:Bool = userDefaults.objectForKey("fetchedPeople") as! Bool
-        self.tableView.userInteractionEnabled = false
-        
-        dispatch_async(backgroundQueue, {
-            print("This is run on the background queue")
-            self.getUserObjectsForContacts()
-            self.tableView.userInteractionEnabled = false
-            
-            dispatch_async(dispatch_get_main_queue(), { () -> Void in
-                print("This is run on the main queue, after the previous code in outer block")
-
-                fetchedPeople = true
-                userDefaults.setObject(true, forKey: "fetchedPeople")
-                userDefaults.setObject(false, forKey: "loggedOut")
-                userDefaults.synchronize()
-
-                self.resetFilteredFriendsArray()
-                self.tableView.userInteractionEnabled = true
-                //self.viewLoaded = true
-                self.navigationItem.rightBarButtonItem?.enabled = true
-                self.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
-
-                self.viewLoaded = true
-                
-                
-                
-                self.newRefreshControl.endRefreshing()
-            })
-        })
-    }
+//    // Refresh the page - load the friends again
+//    func refreshPage(sender:AnyObject) {
+//        self.viewLoaded = false
+//
+//        let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+//        let qualityOfServiceClass = QOS_CLASS_BACKGROUND
+//        let backgroundQueue = dispatch_get_global_queue(qualityOfServiceClass, 0)
+//        self.tableView.userInteractionEnabled = false
+//        
+//        dispatch_async(backgroundQueue, {
+//            print("This is run on the background queue")
+//            UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+//            self.getUserObjectsForContacts()
+//            self.tableView.userInteractionEnabled = false
+//            
+//            dispatch_async(dispatch_get_main_queue(), { () -> Void in
+//                print("This is run on the main queue, after the previous code in outer block")
+//
+//                userDefaults.synchronize()
+//
+//                self.resetFilteredFriendsArray()
+//                self.tableView.userInteractionEnabled = true
+//                self.navigationItem.rightBarButtonItem?.enabled = true
+//                self.navigationItem.rightBarButtonItem?.tintColor = UIColor.whiteColor()
+//
+//                self.viewLoaded = true
+//                
+//                UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+//                self.newRefreshControl.endRefreshing()
+//            })
+//        })
+//    }
     
     
     // Send invites to those the user has invited
     @IBAction func sendInvitesAction(sender: AnyObject) {
-        
         let prevWithoutApp = self.getPrevWithoutApp(self.invitedPeopleWithoutApp)
         let users:[String] = prevWithoutApp.allKeys as! [String]
         
@@ -512,20 +703,34 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             let eventName:String = self.dataSet["eventName"] as! String
             let eventEndDate:NSDate = self.dataSet["endDate"] as! NSDate
             let eventStartDate:NSDate = self.dataSet["date"] as! NSDate
-            let eventLocation:String = self.dataSet["eventLocation"] as! String
+            var eventLocation:String = self.dataSet["eventLocation"] as! String
             let dateFormatter = NSDateFormatter()
-            dateFormatter.dateStyle = NSDateFormatterStyle.LongStyle
-            dateFormatter.timeStyle = .MediumStyle
+            dateFormatter.dateFormat = "EEE, MMM d @ h:mm a"
+            dateFormatter.timeZone = NSTimeZone.localTimeZone()
+
             let startDateString = dateFormatter.stringFromDate(eventStartDate)
             let endDateString = dateFormatter.stringFromDate(eventEndDate)
             
-            // Send text message to those who don't have the app and who you have invited.
-            let messageVC = MFMessageComposeViewController()
-            messageVC.body = "Squad up!! \n\nReach, '" + eventName + "' from " + startDateString + " to " + endDateString + " @ " + eventLocation + ".";
-            messageVC.recipients = users
-            messageVC.messageComposeDelegate = self;
+            if (eventLocation == "") {
+                eventLocation = "To be determined"
+            }
             
-            self.presentViewController(messageVC, animated: true, completion: nil)
+            
+            if (MFMessageComposeViewController.canSendText()) {
+                // Send text message to those who don't have the app and who you have invited.
+                let messageVC = MFMessageComposeViewController()
+                messageVC.body = "Squad up! \n\nI'm organizing an event named: '" + eventName +
+                    "'. \n\nIt's from " + startDateString + " to " +
+                    endDateString + " @ " + eventLocation + ". \n\n" +
+                    "Let me know if you can make it! :)";
+                messageVC.recipients = users
+                messageVC.messageComposeDelegate = self;
+            
+                self.presentViewController(messageVC, animated: true, completion: nil)
+            } else {
+                self.searchActive = true
+                self.createEvent()
+            }
         } else {
             self.createEvent()
         }
@@ -537,6 +742,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         switch (result.rawValue) {
         case MessageComposeResultCancelled.rawValue:
             print("Message was cancelled")
+            self.searchActive = true
             self.dismissViewControllerAnimated(true, completion: nil)
         case MessageComposeResultFailed.rawValue:
             print("Message failed")
@@ -554,6 +760,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     // Create an event.
     func createEvent() {
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
         // Get the data related for the event
         self.dataSet.setObject(self.invitedPeople, forKey: "invitedPeople")
         self.dataSet.setObject(self.goingPeople, forKey: "goingPeople")
@@ -563,6 +770,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         self.dataSet.setObject(self.user!.objectId!, forKey: "eventCreator")
         self.dataSet.setObject(self.user!["name"] as! String, forKey: "eventCreatorName")
         self.dataSet.setObject(false, forKey: "eventCancelled")
+        self.dataSet.setObject(self.friendToFacebookID, forKey: "friendToFacebookIDs")
         
         var event:PFObject!
         if (self.editingEvent == true) {
@@ -571,12 +779,10 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             event = PFObject(className:"Event")
         }
         // Create the new event and save it to db
-        //let event = PFObject(className:"Event")
         event["dataSet"] = self.dataSet
         let success = event.save()
         
         let eventName:String = self.dataSet["eventName"] as! String
-        //var eventEndDate:NSDate = self.dataSet["endDate"] as! NSDate
         let eventStartDate:NSDate = self.dataSet["date"] as! NSDate
         
         if (success) {
@@ -628,7 +834,6 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                     
                     //Set up channels for event
                     let eventAuthorChannelKey:String = event.objectId! + "Author"
-                    //var eventReminderChannelKey:String = event.objectId! + "Reminder"
                     event["eventAuthorChannel"] = eventAuthorChannelKey
                     event.saveInBackground()
 
@@ -646,10 +851,6 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 print("This is run on the background queue")
                 
                 // Add events for users who have been invited and have the app and subcsribe them to appropriate channels for push notifs.
-                self.addEventsForInvitedUsers(event)
-                
-                
-                //let users:[AnyObject] = self.invitedPeopleWithApp.allKeys
                 
                 // Separate people into those who have already been invited (and going/invited) and those who are new
                 let newInvitees:NSMutableDictionary = self.getNewInvitees(self.invitedPeopleWithApp)
@@ -661,31 +862,38 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 let prevInviteeUsers:[AnyObject] = prevInvitees.allKeys
                 let prevPeople:[AnyObject] = prevInviteeUsers + goingUsers
                 
-                // For those already invited (going/invited) send "edited event notif"
-                // For those who are new, send invited notif and scheduled notif
+                // Add event for the new invited users
+                print(newInvitees)
+                print(self.dataSet["invitedPeople"] as! NSMutableDictionary)
                 
-                // Send push notification to people who were just invited to event
-                let pushQuery = PFInstallation.query()
-                pushQuery?.whereKey("userId", containedIn: newInviteeUsers)
-                let push = PFPush()
-                push.setQuery(pushQuery)
-                push.setMessage("You've been invited to: " + eventName)
-                push.sendPushInBackground()
-
-                let secondPushQuery = PFInstallation.query()
-                secondPushQuery?.whereKey("userId", containedIn: prevPeople)
-                let secondPush = PFPush()
-                secondPush.setQuery(secondPushQuery)
-                secondPush.setMessage(self.user!["name"] as! String + " has made changes to the event: " + eventName)
-                secondPush.sendPushInBackground()
-                
-                
-                // Create and send scheduled notification to users when the event is about to start
-                self.sendScheduledNotificationForEvent(event, eventName: eventName, eventStartDate: eventStartDate)
 
                 dispatch_async(dispatch_get_main_queue(), { () -> Void in
                     //print("This is run on the main queue, after the previous code in outer block")
                     //print("Added events for invited users in background")
+                    
+                    self.addEventsForInvitedUsers(event, newInvites: self.dataSet["invitedPeople"] as! NSMutableDictionary)
+                    
+                    // For those already invited (going/invited) send "edited event notif"
+                    // For those who are new, send invited notif and scheduled notif
+                    
+                    // Send push notification to people who were just invited to event
+                    let pushQuery = PFInstallation.query()
+                    pushQuery?.whereKey("userId", containedIn: newInviteeUsers)
+                    let push = PFPush()
+                    push.setQuery(pushQuery)
+                    push.setMessage("You've been invited to: " + eventName)
+                    push.sendPushInBackground()
+                    
+                    let secondPushQuery = PFInstallation.query()
+                    secondPushQuery?.whereKey("userId", containedIn: prevPeople)
+                    let secondPush = PFPush()
+                    secondPush.setQuery(secondPushQuery)
+                    secondPush.setMessage(self.user!["name"] as! String + " has made changes to the event: " + eventName)
+                    secondPush.sendPushInBackground()
+                    
+                    
+                    // Create and send scheduled notification to users when the event is about to start
+                    self.sendScheduledNotificationForEvent(event, eventName: eventName, eventStartDate: eventStartDate, newInviteeUsers: newInviteeUsers, prevPeople: prevPeople)
                 })
             })
             
@@ -702,6 +910,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 })
             })
             
+            UIApplication.sharedApplication().networkActivityIndicatorVisible = false
             let switchViewController = self.navigationController!.viewControllers[self.navigationController!.viewControllers.count - 3] 
             self.navigationController?.popToViewController(switchViewController, animated: true)
         } else {
@@ -712,7 +921,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     
     func getNewInvitees(list:NSMutableDictionary) -> NSMutableDictionary {
-        var result:NSMutableDictionary = NSMutableDictionary()
+        let result:NSMutableDictionary = NSMutableDictionary()
         for (id, value) in list {
             if (!self.checkIfPreviouslyInvited(id as! String)) {
                 result.setObject(value, forKey: id as! String)
@@ -723,15 +932,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
     
     func getPrevInvited(list:NSMutableDictionary) -> NSMutableDictionary {
-        var result:NSMutableDictionary = NSMutableDictionary()
+        let result:NSMutableDictionary = NSMutableDictionary()
         for (id, value) in list {
             if (id as! String == (self.user?.objectId)!) {
                 continue
             }
-            if let member:String = self.prevGoingPeople[id as! String] as? String {
+            if let _:String = self.prevGoingPeople[id as! String] as? String {
                 result.setObject(value, forKey: id as! String)
             }
-            if let member:String = self.prevInvitedPeopleWithApp[id as! String] as? String {
+            if let _:String = self.prevInvitedPeopleWithApp[id as! String] as? String {
                 result.setObject(value, forKey: id as! String)
             }
         }
@@ -739,9 +948,9 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
     
     func getPrevWithoutApp(list:NSMutableDictionary) -> NSMutableDictionary {
-        var result:NSMutableDictionary = NSMutableDictionary()
+        let result:NSMutableDictionary = NSMutableDictionary()
         for (id, value) in list {
-            if let member:String = self.prevInvitedPeopleWithoutApp[id as! String] as? String {
+            if let _:String = self.prevInvitedPeopleWithoutApp[id as! String] as? String {
                 //
             } else {
                 result.setObject(value, forKey: id as! String)
@@ -753,17 +962,23 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     
     // Create and send scheduled notification for event starting to users.
-    func sendScheduledNotificationForEvent(eventObject: PFObject, eventName: String, eventStartDate: NSDate) {
+    func sendScheduledNotificationForEvent(eventObject: PFObject, eventName: String, eventStartDate: NSDate, newInviteeUsers: [AnyObject], prevPeople: [AnyObject]) {
         let dateFormatter = NSDateFormatter()
         dateFormatter.dateStyle = NSDateFormatterStyle.LongStyle
+        dateFormatter.timeZone = NSTimeZone.localTimeZone()
         let dateString = dateFormatter.stringFromDate(eventStartDate)
         
         let tempDateFormatter = NSDateFormatter()
         tempDateFormatter.timeStyle = NSDateFormatterStyle.LongStyle
+        tempDateFormatter.timeZone = NSTimeZone.localTimeZone()
         let timeString = tempDateFormatter.stringFromDate(eventStartDate)
         let pushDate = dateString + ", " + timeString
         
-        let users:[AnyObject] = self.invitedPeopleWithApp.allKeys
+        var users = newInviteeUsers
+        
+        if (prevPeople.count == 0) {
+            users.append((self.user?.objectId)!)
+        }
         
         PFCloud.callFunctionInBackground("sendPushNotifications",
             withParameters: ["pushDate": pushDate, "users": users, "eventName": eventName]) {
@@ -779,37 +994,43 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     
     
-    func addEventsForInvitedUsers(event: PFObject) {
+    func addEventsForInvitedUsers(event: PFObject, newInvites:NSMutableDictionary) {
         
         // Iterate through self.invitedPeopleWithApp, get their user object, add event to list.
-        for (objectId, value) in self.invitedPeopleWithApp {
-            
-            if (self.editingEvent == true) {
-                if (self.checkIfPreviouslyInvited(objectId as! String)) {
-                    continue
-                }
-            }
+        for (objectId, _) in newInvites {
             
             let query = PFUser.query()
             query!.whereKey("objectId", equalTo:objectId)
             
-            query!.findObjectsInBackgroundWithBlock {
-                (appUsers: [AnyObject]?, error: NSError?) -> Void in
-                
-                if error == nil {
-                    // The find succeeded.
-                    if let appUsers = appUsers as? [PFUser] {
-                        if (appUsers.isEmpty) {
-                            print("No users with objectId: " + (objectId as! String))
-                        } else {
-                            var appUser:PFUser = appUsers[0]
-                            self.addEventForUser(appUser, event: event)
-                        }
-                    }
+            let appUsers:[AnyObject] = query!.findObjects()!
+            // The find succeeded.
+            if let appUsers = appUsers as? [PFUser] {
+                if (appUsers.isEmpty) {
+                    print("No users with objectId: " + (objectId as! String))
                 } else {
-                    print("Error: \(error!) \(error!.userInfo)")
+                    let appUser:PFUser = appUsers[0]
+                    self.addEventForUser(appUser, event: event)
                 }
             }
+            
+            
+//            query!.findObjectsInBackgroundWithBlock {
+//                (appUsers: [AnyObject]?, error: NSError?) -> Void in
+//                
+//                if error == nil {
+//                    // The find succeeded.
+//                    if let appUsers = appUsers as? [PFUser] {
+//                        if (appUsers.isEmpty) {
+//                            print("No users with objectId: " + (objectId as! String))
+//                        } else {
+//                            let appUser:PFUser = appUsers[0]
+//                            self.addEventForUser(appUser, event: event)
+//                        }
+//                    }
+//                } else {
+//                    print("Error: \(error!) \(error!.userInfo)")
+//                }
+//            }
         }
     }
     
@@ -817,13 +1038,9 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     func addEventForUser(user: PFUser, event: PFObject) {
         user.fetch()
-        event.fetchIfNeeded()
-        print("USER!")
-        print(user["name"])
-        print(user["events"])
+        event.fetch()
         
         if let userEventsObject:PFObject = user["events"] as? PFObject {
-            print("GOT IN HERE!!!!")
             userEventsObject.fetch()
             
             let eventsDict:NSMutableDictionary = userEventsObject["events"] as! NSMutableDictionary
@@ -833,6 +1050,11 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             let eventStartDate:NSDate = eventDataSet["date"] as! NSDate
             var added = false
             
+            print(userEventsObject)
+            print("***")
+            print(eventsDict)
+            print("**")
+            print(userEvents)
             // Add event in the correct order in the user's events list, by date.
             for dict:AnyObject in userEvents {
                 let eventObject:PFObject = dict as! PFObject
@@ -856,16 +1078,21 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 newMutableList.addObject(event)
             }
             
+            print("**@&@*@&*")
+            print(newMutableList)
+            print(event)
             eventsDict[user.objectId!] = newMutableList
             userEventsObject["events"] = eventsDict
             let success:Bool = userEventsObject.save()
+            userEventsObject.saveEventually()
+            print("**@&@*@&*")
+            print(userEventsObject[user.objectId!])
             
             if (!success) {
                 print("NOT SUCCESS....!")
-                //userEventsObject.save()
+                userEventsObject.save()
                 userEventsObject.saveEventually()
             }
-
         }
     }
     
@@ -944,7 +1171,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 self.squadUpReminderCalendar = EKCalendar(forEntityType: EKEntityType.Event, eventStore: self.eventStore)
                 self.squadUpReminderCalendar!.title = "Squad Up Calendar"
                 self.squadUpReminderCalendar!.source = self.eventStore.defaultCalendarForNewEvents.source
-                let error: NSError?
+                var error: NSError?
                 let result: Bool
                 
                 do {
@@ -1035,8 +1262,9 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     
     
     // get fb profile pic
-    func getProfPic(fid: String) -> UIImage? {
+    func getProfPic(fid: String, name: String) -> UIImage? {
 
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
         let url = NSURL(string: "https://graph.facebook.com/" + fid + "/picture?type=large")!
         
         let urlRequest = NSURLRequest(URL: url)
@@ -1046,20 +1274,39 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 returningResponse: AutoreleasingUnsafeMutablePointer<NSURLResponse?>())
             let image:UIImage = UIImage(data: urlData)!
 
+            UIApplication.sharedApplication().networkActivityIndicatorVisible = false
             return image
             
-        } catch let error as NSError {
-            print("CAUGHT ERROR")
+        } catch {
+            print("Error getting profile pic")
+            let contactPic:UIImage = UIImage(named: "greybox.png")!
+            let fullNameArr = name.componentsSeparatedByString(" ")
+            var initials:String = ""
+            for char in fullNameArr[0].characters {
+                initials = initials + String(char)
+                break
+            }
+            if (fullNameArr.count > 1) {
+                for char in fullNameArr[1].characters {
+                    initials = initials + String(char)
+                    break
+                }
+            }
+            return textToImage(initials, inImage: contactPic, atPoint: CGPointMake(35, 45))
         }
 
-        return nil
+        //return nil
 
     }
     
 
+    
+    
     override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
 
-        
+        if (self.viewLoaded && (self.friendsWithApp.count == 0 || self.filteredFriendsWithApp.count == 0)) {
+            self.actInd.stopAnimating()
+        }
         
         if (indexPath.section == 0) {
             let cell = self.tableView.dequeueReusableCellWithIdentifier("SquadFriendCell", forIndexPath: indexPath) as! SquadInviteFriendsTableViewCell
@@ -1068,26 +1315,19 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             
             
             var phoneContact:String = ""
-            var phoneNumber:String = ""
             
             if (self.viewLoaded || false) {
+                self.actInd.stopAnimating()
                 let friend:Friend = self.filteredFriendsWithApp[indexPath.row]
                 phoneContact = friend.name
                 cell.userInteractionEnabled = true
                 cell.friendName.textColor = UIColor.blackColor()
                 
-                if (self.editingEvent == true) {
-                    if (self.checkIfPreviouslyInvited(friend.objectId)) {
-                        cell.userInteractionEnabled = false
-                        cell.friendName.textColor = UIColor.redColor()
-                    }
-                }
                 cell.objectId = friend.objectId
                 cell.friend = friend
                 
                 
                 if (self.invitedPeople.objectForKey(friend.objectId) != nil) {
-                    
                     cell.invited = true
                     cell.invitedSymbol.hidden = false
                 } else {
@@ -1095,9 +1335,20 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                     cell.invitedSymbol.hidden = !(cell.invited!)
                 }
                 
+                if (self.editingEvent == true) {
+                    if (self.checkIfPreviouslyInvited(friend.objectId)) {
+                        cell.userInteractionEnabled = false
+                        cell.friendName.textColor = UIColor.redColor()
+                        cell.invitedSymbol.hidden = false
+                    }
+                }
+    
                 
                 
-                cell.addSubview(friend.profilePicView)
+                cell.friendImage.image = friend.profilePicView.image
+                cell.friendImage.frame = CGRect(x: 15, y: 13, width: 40, height: 40)
+                cell.friendImage.layer.cornerRadius = cell.friendImage.frame.size.width / 2
+                cell.friendImage.clipsToBounds = true
                 
                 
             }
@@ -1105,11 +1356,21 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             // Configure the cell.
             cell.friendName.text = phoneContact
             
+            let border2 = CALayer()
+            let width2 = CGFloat(2.0)
+            border2.borderColor = UIColor(red: 235.0/256.0, green: 235.0/256.0, blue: 235.0/256.0, alpha: 1.0).CGColor
+            border2.frame = CGRect(x: 0, y: 0, width: cell.frame.size.width, height: 1)
+            
+            border2.borderWidth = width2
+            
+            cell.layer.addSublayer(border2)
+            
             return cell
         } else {
             let cell = self.tableView.dequeueReusableCellWithIdentifier("FriendCell", forIndexPath: indexPath) as! InviteFriendsTableViewCell
             
             cell.selectionStyle = UITableViewCellSelectionStyle.None
+            //self.actInd.stopAnimating()
             
             
             var phoneContact:String = ""
@@ -1143,11 +1404,25 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                     cell.invitedSymbol.hidden = !(cell.invited!)
                 }
                 
-                cell.addSubview(friend.profilePicView)
+            
+
+                cell.friendImage.image = friend.profilePicView.image
+                cell.friendImage.layer.cornerRadius = cell.friendImage.frame.size.width / 2
+                cell.friendImage.clipsToBounds = true
             }
             // Configure the cell.
             cell.friendName.text = phoneContact
             cell.phoneNumber.text = phoneNumber
+            
+            
+            let border2 = CALayer()
+            let width2 = CGFloat(2.0)
+            border2.borderColor = UIColor(red: 235.0/256.0, green: 235.0/256.0, blue: 235.0/256.0, alpha: 1.0).CGColor
+            border2.frame = CGRect(x: 0, y: 0, width: cell.frame.size.width, height: 1)
+            
+            border2.borderWidth = width2
+            
+            cell.layer.addSublayer(border2)
             
             return cell
         }
@@ -1171,7 +1446,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
         
         // Setup the font specific variables
         let textColor: UIColor = UIColor.whiteColor()
-        let textFont: UIFont = UIFont(name: "Helvetica Bold", size: 115)!
+        let textFont: UIFont = UIFont(name: "HelveticaNeue-Light", size: 115)!
         
         //Setup the image context using the passed image.
         UIGraphicsBeginImageContext(inImage.size)
@@ -1182,14 +1457,22 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             NSForegroundColorAttributeName: textColor,
         ]
         
+        let size:CGSize = drawText.sizeWithAttributes(textFontAttributes)
+        
+        
         //Put the image into a rectangle as large as the original image.
         inImage.drawInRect(CGRectMake(0, 0, inImage.size.width, inImage.size.height))
         
         // Creating a point within the space that is as bit as the image.
-        let rect: CGRect = CGRectMake(atPoint.x, atPoint.y, inImage.size.width, inImage.size.height)
+        //let rect: CGRect = CGRectMake(0 + , atPoint.y, inImage.size.width, inImage.size.height)
+        
+        let textRect:CGRect = CGRectMake(CGFloat(0.0) + CGFloat(floorf(Float(inImage.size.width - size.width) / Float(2.0))),
+            CGFloat(Float(0) + floorf(Float(inImage.size.height - size.height) / Float(2.0))),
+            size.width,
+            size.height);
         
         //Now Draw the text into an image.
-        drawText.drawInRect(rect, withAttributes: textFontAttributes)
+        drawText.drawInRect(textRect, withAttributes: textFontAttributes)
         
         // Create a new image out of the images we have created
         let newImage: UIImage = UIGraphicsGetImageFromCurrentImageContext()
@@ -1218,6 +1501,17 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
     
     
+    
+    override func tableView(tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
+        
+        let header: UITableViewHeaderFooterView = view as! UITableViewHeaderFooterView
+        header.contentView.backgroundColor = UIColor(red: 230.0/256.0, green: 230.0/256.0, blue: 230.0/256.0, alpha: 1.0)
+        header.textLabel!.font = UIFont(name: "HelveticaNeue-Light", size: 14)!
+        header.textLabel!.textColor = UIColor(red: 107.0/256.0, green: 107.0/256.0, blue: 107.0/256.0, alpha: 1.0)
+        header.alpha = 1.0 //make the header transparent
+    }
+    
+    
     // Get contacts from user's address book.
     func promptForAddressBookRequestAccess() {
         self.viewLoaded = false
@@ -1237,7 +1531,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 for contact:CNContact in cnContacts {
                     if (contact.isKeyAvailable(CNContactPhoneNumbersKey)) {
                         for number:CNLabeledValue in contact.phoneNumbers {
-                            if (number.label != "_$!<Mobile>!$_" && number.label != "iPhone" && number.label != "_$!<Home>!$_" && number.label != "_$!<Other>!$_") {
+                            if (false && number.label != "_$!<Mobile>!$_" && number.label != "iPhone" && number.label != "_$!<Home>!$_" && number.label != "_$!<Other>!$_" && number.label != "_$!<Work>!$_") {
                                 continue
                             } else {
                                 let username:String = contact.givenName + " " + contact.familyName
@@ -1260,14 +1554,12 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 userDefaults.synchronize()
                 
             } catch let error1 as NSError {
-                //
-                print("ERROR")
+                print("Error!")
                 print(error1.description)
             }
             
         } else {
             // Fallback on earlier versions
-            
             
             ABAddressBookRequestAccessWithCompletion(self.addressBookRef) {
                 (granted: Bool, error: CFError!) in
@@ -1276,9 +1568,11 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                         print("Address Book Request Access Just denied")
                     } else {
                         print("Address Book Request Access Just authorized")
+                        print(self.addressBookRef)
+                        let people = ABAddressBookCopyArrayOfAllPeople(self.addressBookRef).takeRetainedValue() as NSArray
                         
-                        if let people = ABAddressBookCopyArrayOfAllPeople(self.addressBookRef)?.takeRetainedValue() as? NSMutableArray {
-                            
+                        if true {
+  
                             let contacts = NSMutableDictionary()
                             
                             // Iterate through each person in contact list.
@@ -1288,7 +1582,7 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                                     if let copyLabel = ABMultiValueCopyLabelAtIndex(numbers,ix) {
                                         if let label = copyLabel.takeRetainedValue() as? String {
                                             
-                                            if (label != "_$!<Mobile>!$_" && label != "iPhone" && label != "_$!<Home>!$_" && label != "_$!<Other>!$_") {
+                                            if (false && label != "_$!<Mobile>!$_" && label != "iPhone" && label != "_$!<Home>!$_" && label != "_$!<Other>!$_" && label != "_$!<Work>!$_") {
                                                 continue
                                             } else {
                                                 
@@ -1334,39 +1628,87 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
     
     
-    // Get User's Facebook friends
-    func getFacebookFriends() {
-        let fbRequest = FBSDKGraphRequest(graphPath:"/me/friends", parameters: nil)
-        fbRequest.startWithCompletionHandler { (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
+    func finishLoadingFBFriends(result:Bool) {
+        if (result) {
+            // temp
+            let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+            // Get phone contacts
+            //self.promptForAddressBookRequestAccess()
             
-            let resultDict = result as! NSMutableDictionary
-            let data:NSMutableArray = resultDict.objectForKey("data") as! NSMutableArray
+            //let phoneContacts:NSMutableDictionary = userDefaults.objectForKey("phoneContacts") as! NSMutableDictionary
             
-            for var i = 0; i < data.count; i++ {
-                let valueDict : NSMutableDictionary = data[i] as! NSMutableDictionary
-                let id = valueDict.objectForKey("id") as! String
-                self.getFacebookName(String(id))
+            // Get facebook contacts for user
+            var facebookContacts:NSMutableDictionary = NSMutableDictionary()
+            
+            if let facebookFriendList:NSMutableDictionary = userDefaults.objectForKey("facebookContacts") as? NSMutableDictionary {
+                facebookContacts = facebookFriendList
             }
             
-            if error == nil {
-                print("Friends are : \(result)")
-            } else {
-                print("Error Getting Friends \(error)");
-            }
+            
+            print("FACEBOOK CNTACTS")
+            //print(facebookContacts)
+            // Create the index and friends list for facebook people who have the app
+//            for (fbid, friendName) in facebookContacts {
+//                let name = friendName as! String
+//                let query = PFUser.query()
+//                query!.whereKey("facebookID", equalTo:fbid)
+//                var appUsers = query!.findObjects() as! [PFUser]
+//                
+//                if (appUsers.isEmpty) {
+//                    print("No users with that facebookid")
+//                } else {
+//                    let appUser:PFUser = appUsers[0]
+//                    self.friendsWithApp.setObject(name, forKey: appUser.objectId!)
+//                    self.friendToFacebookID.setObject(fbid, forKey: appUser.objectId!)
+//                    self.indexApp.setObject(appUser.objectId!, forKey: String(self.appCount))
+//                    self.appCount++
+//                }
+//            }
+            
+//            self.friendToFacebookID.setObject(self.user!["facebookID"]!, forKey: self.user!.objectId!)
+//            
+//            userDefaults.setObject(self.friendToFacebookID, forKey: "friendToFacebookID")
+//            userDefaults.synchronize()
+//            self.resetFilteredFriendsArray()
+            self.viewLoaded = true
+            self.tableView.reloadData()
+            self.footerCollectionView.reloadData()
         }
+        
+
     }
     
     
-    // Get facebook name for the given facebook id
-    func getFacebookName(id: String) {
-        let fbRequest = FBSDKGraphRequest(graphPath:"/" + id, parameters: nil)
-        fbRequest.startWithCompletionHandler { (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
+    // Get User's Facebook friends
+    func getFacebookFriends() {
+        print("INSIDE GETFBFRIENDS")
+        
+        self.friendToFacebookID.setObject(self.user!["facebookID"]!, forKey: self.user!.objectId!)
+        
+        let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+        userDefaults.setObject(self.friendToFacebookID, forKey: "friendToFacebookID")
+        userDefaults.synchronize()
+        
+        let fbRequest:FBSDKGraphRequest = FBSDKGraphRequest(graphPath:"/me/friends", parameters: ["fields": "id, name"])
+
+        
+        fbRequest.startWithCompletionHandler ({ (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
             
-            var resultDict = result as! NSMutableDictionary
+            self.viewLoaded = false
+            print("GOT HERE IN GET FB FRIENDS")
+            let resultDict = result as! NSMutableDictionary
+            let data:NSMutableArray = resultDict.objectForKey("data") as! NSMutableArray
             
-            if error == nil {
-                let str = result.objectForKey("name") as! String
-                let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+            
+            let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+            
+            for var i = 0; i < data.count; i++ {
+                let valueDict : NSMutableDictionary = data[i] as! NSMutableDictionary
+                print(valueDict)
+                let id = valueDict.objectForKey("id") as! String
+                
+                let str = valueDict.objectForKey("name") as! String
+                
                 let facebookContacts:NSMutableDictionary? = userDefaults.objectForKey("facebookContacts") as? NSMutableDictionary
                 var copy:NSMutableDictionary = NSMutableDictionary()
                 
@@ -1375,18 +1717,116 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
                 } else {
                     copy = facebookContacts!.mutableCopy() as! NSMutableDictionary
                     copy.setObject(str, forKey: id)
+                    
+                    let name = str 
+                    let query = PFUser.query()
+                    query!.whereKey("facebookID", equalTo:id)
+                    var appUsers = query!.findObjects() as! [PFUser]
+                    
+                    if (appUsers.isEmpty) {
+                        print("No users with that facebookid")
+                    } else {
+                        let appUser:PFUser = appUsers[0]
+                        self.friendsWithApp.setObject(name, forKey: appUser.objectId!)
+                        self.friendToFacebookID.setObject(id, forKey: appUser.objectId!)
+                        self.indexApp.setObject(appUser.objectId!, forKey: String(self.appCount))
+                        self.appCount++
+                    }
+                    //print("***")
+                    //print(str)
                 }
+                
+                userDefaults.setObject(self.friendToFacebookID, forKey: "friendToFacebookID")
+                userDefaults.setObject(self.friendsWithApp, forKey: "friendsWithApp")
+                userDefaults.setObject(self.indexApp, forKey: "indexApp")
                 
                 userDefaults.setObject(copy, forKey: "facebookContacts")
                 userDefaults.synchronize()
-            } else {
-                print("Error Getting Friends \(error)");
+                
+                //self.viewLoaded = true
+                
+                self.tableView.reloadData()
+                self.footerCollectionView.reloadData()
+                //self.resetFilteredFriendsArray()
+                
+                
+                
+                //self.getFacebookName(String(id))//, completion: {(result)->Void in
+                   // print("getfbname returend!!!")
+
+                    //self.finishLoadingFBFriends(true)
+                    
+                //})
             }
-        }
+            
+            self.resetFilteredFriendsArray()
+            
+            
+
+        })
     }
+    
+    
+//    // Get facebook name for the given facebook id
+//    func getFacebookName(id: String) {// , completion:(result:String)->Void) {
+//        print("INSIDE GET FACEBOOK NAME")
+//        let fbRequest = FBSDKGraphRequest(graphPath:"/" + id, parameters: nil)
+//        
+//        fbRequest.startWithCompletionHandler({ (connection : FBSDKGraphRequestConnection!, result : AnyObject!, error : NSError!) -> Void in
+//                        
+//            if error == nil {
+//                let str = result.objectForKey("name") as! String
+//                let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
+//                let facebookContacts:NSMutableDictionary? = userDefaults.objectForKey("facebookContacts") as? NSMutableDictionary
+//                var copy:NSMutableDictionary = NSMutableDictionary()
+//                
+//                if (facebookContacts == nil) {
+//                    copy = NSMutableDictionary()
+//                } else {
+//                    copy = facebookContacts!.mutableCopy() as! NSMutableDictionary
+//                    copy.setObject(str, forKey: id)
+//                    
+//                    let name = str as! String
+//                    let query = PFUser.query()
+//                    query!.whereKey("facebookID", equalTo:id)
+//                    var appUsers = query!.findObjects() as! [PFUser]
+//                    
+//                    if (appUsers.isEmpty) {
+//                        print("No users with that facebookid")
+//                    } else {
+//                        let appUser:PFUser = appUsers[0]
+//                        self.friendsWithApp.setObject(name, forKey: appUser.objectId!)
+//                        self.friendToFacebookID.setObject(id, forKey: appUser.objectId!)
+//                        self.indexApp.setObject(appUser.objectId!, forKey: String(self.appCount))
+//                        self.appCount++
+//                    }
+//                    //print("***")
+//                    //print(str)
+//                }
+//                
+//                userDefaults.setObject(self.friendToFacebookID, forKey: "friendToFacebookID")
+//                userDefaults.setObject(self.friendsWithApp, forKey: "friendsWithApp")
+//                userDefaults.setObject(self.indexApp, forKey: "indexApp")
+//
+//                userDefaults.setObject(copy, forKey: "facebookContacts")
+//                userDefaults.synchronize()
+//                
+//                //self.viewLoaded = true
+//                
+//                self.tableView.reloadData()
+//                self.footerCollectionView.reloadData()
+//                self.resetFilteredFriendsArray()
+//                //completion(result:"TEST")
+//            } else {
+//                print("Error Getting Friends \(error)");
+//            }
+//        })
+//    }
 
 
     func getUserObjectsForContacts() {
+        //self.actInd.startAnimating()
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
         let userDefaults:NSUserDefaults = NSUserDefaults.standardUserDefaults()
         self.friendsWithApp = NSMutableDictionary()
         self.indexApp = NSMutableDictionary()
@@ -1397,124 +1837,71 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             if PFFacebookUtils.isLinkedWithUser(self.user!) {
                 print("User is linked with Facebook")
                 self.getFacebookFriends()
+                
+                // Get phone contacts
+                self.promptForAddressBookRequestAccess()
+                
+                let phoneContacts:NSMutableDictionary = userDefaults.objectForKey("phoneContacts") as! NSMutableDictionary
+                
+                // Create the index and friends list for people who are not on fb and who have or may not have the app
+                for (key, value) in phoneContacts {
+                    self.friendsWithoutApp.setObject(value as! String, forKey: key as! String)
+                    self.indexWithoutApp.setObject(key as! String, forKey: String(self.withoutAppCount))
+                    self.withoutAppCount++
+                }
+                
+                userDefaults.setObject(self.friendsWithoutApp, forKey: "friendsWithoutApp")
+                userDefaults.setObject(self.indexWithoutApp, forKey: "indexWithoutApp")
+                userDefaults.synchronize()
+                //self.resetFilteredFriendsArray()
+                
             } else {
                 print("User is not linked with Facebook")
                 let emptyDict:NSMutableDictionary = NSMutableDictionary()
                 userDefaults.setObject(emptyDict, forKey: "facebookContacts")
+                
+                
+                // Get phone contacts
+                self.promptForAddressBookRequestAccess()
+                
+                let phoneContacts:NSMutableDictionary = userDefaults.objectForKey("phoneContacts") as! NSMutableDictionary
+                
+                // Create the index and friends list for people who are not on fb and who have or may not have the app
+                for (key, value) in phoneContacts {
+                    self.friendsWithoutApp.setObject(value as! String, forKey: key as! String)
+                    self.indexWithoutApp.setObject(key as! String, forKey: String(self.withoutAppCount))
+                    self.withoutAppCount++
+                }
+                
+                userDefaults.setObject(self.friendsWithApp, forKey: "friendsWithApp")
+                userDefaults.setObject(self.friendsWithoutApp, forKey: "friendsWithoutApp")
+                userDefaults.setObject(self.indexApp, forKey: "indexApp")
+                userDefaults.setObject(self.indexWithoutApp, forKey: "indexWithoutApp")
+                userDefaults.synchronize()
+                //self.resetFilteredFriendsArray()
             }
         }
         
-        // Get phone contacts
-        self.promptForAddressBookRequestAccess()
-        
-        let phoneContacts:NSMutableDictionary = userDefaults.objectForKey("phoneContacts") as! NSMutableDictionary
-   
-        // Get facebook contacts for user
-        var facebookContacts:NSMutableDictionary = NSMutableDictionary()
-        
-        if let facebookFriendList:NSMutableDictionary = userDefaults.objectForKey("facebookContacts") as? NSMutableDictionary {
-            facebookContacts = facebookFriendList
-        }
-        
-        // Create the index and friends list for facebook people who have the app
-        for (fbid, friendName) in facebookContacts {
-            let name = friendName as! String
-            let query = PFUser.query()
-            query!.whereKey("facebookID", equalTo:fbid)
-            var appUsers = query!.findObjects() as! [PFUser]
-            
-            if (appUsers.isEmpty) {
-                print("No users with that facebookid")
-            } else {
-                let appUser:PFUser = appUsers[0]
-                self.friendsWithApp.setObject(name, forKey: appUser.objectId!)
-                self.friendToFacebookID.setObject(fbid, forKey: appUser.objectId!)
-                self.indexApp.setObject(appUser.objectId!, forKey: String(self.appCount))
-                self.appCount++
-            }
-        }
-        
-        // Create the index and friends list for people who are not on fb and who have or may not have the app
-        for (key, value) in phoneContacts {
-//            let query = PFUser.query()
-//            query!.whereKey("phoneNumber", equalTo:key)
-//            var appUsers = query!.findObjects() as! [PFUser]
-//            print("KEY")
-//            print(key)
-
-            if (true) { // || appUsers.isEmpty) {
-                self.friendsWithoutApp.setObject(value as! String, forKey: key as! String)
-                self.indexWithoutApp.setObject(key as! String, forKey: String(self.withoutAppCount))
-                self.withoutAppCount++
-            }
-//            } else {
-//                let appUser:PFUser = appUsers[0]
-//                if let phoneNumber = appUser["phoneNumber"] as? String {
-//                    
-//                    if (phoneNumber == key as! String) {
-//                        let userName:String = appUser["name"] as! String
-//                        let currentUserName:String = self.user?["name"]! as! String
-//                        let objectId:String = appUser.objectId!
-//                        
-//                        if (userName != currentUserName) {
-//                            if PFFacebookUtils.isLinkedWithUser(appUser) {
-//                                let fbID:String = appUser["facebookID"] as! String
-//                                
-//                                
-//                                if let checkName:String = facebookContacts.objectForKey(fbID) as? String {
-//                                    // User is already in facebook friends list so no need to add them again to friends with app list
-//                                } else {
-//                                    // User is not in facebook friends list so add them to friends with app list
-//                                    self.friendsWithApp.setObject(userName, forKey: objectId)
-//                                    self.indexApp.setObject(objectId, forKey: String(self.appCount))
-//                                    self.appCount++
-//                                }
-//                            } else {
-//                                // Add phone number and user to friendsWithApp list
-//                                self.friendsWithApp.setObject(userName, forKey: objectId)
-//                                self.indexApp.setObject(objectId, forKey: String(self.appCount))
-//                                self.appCount++
-//                            }
-//                        }
-//                    } else {
-//                        // phone number is not a user
-//                    }
-//                }
-//                
-//            }
-        }
-
-        userDefaults.setObject(self.friendToFacebookID, forKey: "friendToFacebookID")
-        userDefaults.setObject(self.friendsWithApp, forKey: "friendsWithApp")
-        userDefaults.setObject(self.friendsWithoutApp, forKey: "friendsWithoutApp")
-        userDefaults.setObject(self.indexApp, forKey: "indexApp")
-        userDefaults.setObject(self.indexWithoutApp, forKey: "indexWithoutApp")
-        userDefaults.synchronize()
-        self.resetFilteredFriendsArray()
+        //self.actInd.stopAnimating()
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = false
     }
     
     
     
     func checkIfPreviouslyInvited(friendID:String) -> Bool {
-        print(friendID)
-        if let member:String = self.prevGoingPeople[friendID] as? String {
-            print("1")
+        if let _:String = self.prevGoingPeople[friendID] as? String {
             return true
         }
-        if let member:String = self.prevInvitedPeople[friendID] as? String {
-            print("2")
+        if let _:String = self.prevInvitedPeople[friendID] as? String {
             return true
         }
-        if let member:String = self.prevInvitedPeopleWithApp[friendID] as? String {
-            print("3")
+        if let _:String = self.prevInvitedPeopleWithApp[friendID] as? String {
             return true
         }
-        if let member:String = self.prevInvitedPeopleWithoutApp[friendID] as? String {
-            print("4")
+        if let _:String = self.prevInvitedPeopleWithoutApp[friendID] as? String {
             return true
         }
-        if let member:String = self.prevNotGoingPeople[friendID] as? String {
-            print("5")
+        if let _:String = self.prevNotGoingPeople[friendID] as? String {
             return true
         }
         
@@ -1522,22 +1909,22 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
     }
     
     
+    override func tableView(tableView: UITableView, didHighlightRowAtIndexPath indexPath: NSIndexPath) {
+        tableView.cellForRowAtIndexPath(indexPath)!.backgroundColor = UIColor(red: 235.0/256.0, green: 235.0/256.0, blue: 235.0/256.0, alpha: 1.0)
+    }
+    
+    override func tableView(tableView: UITableView, didUnhighlightRowAtIndexPath indexPath: NSIndexPath) {
+        tableView.cellForRowAtIndexPath(indexPath)!.backgroundColor = UIColor.whiteColor()
+    }
+    
     
     // Handle when user selects a row/user to invite
     override func tableView(table: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
         self.DismissKeyboard()
         
-        
-        
-        
-        
-        
-        
-        
         let indexSection = indexPath.section
         
-        
-        
+ 
         if (indexSection == 0) {
             let cell = self.tableView.cellForRowAtIndexPath(indexPath) as! SquadInviteFriendsTableViewCell
             
@@ -1619,47 +2006,15 @@ class EventInviteFriendsTableViewController: UITableViewController,  MFMessageCo
             }
         }
         
-        
+        if (self.invitedPeople.count == 0) {
+            noneSelectedLabel.text = "No friends selected yet"
+        } else {
+            noneSelectedLabel.text = ""
+        }
         self.footerCollectionView.reloadData()
         
     }
     
-    
-
-    /*
-    // Override to support conditional editing of the table view.
-    override func tableView(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath) -> Bool {
-        // Return NO if you do not want the specified item to be editable.
-        return true
-    }
-    */
-
-    /*
-    // Override to support editing the table view.
-    override func tableView(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath) {
-        if editingStyle == .Delete {
-            // Delete the row from the data source
-            tableView.deleteRowsAtIndexPaths([indexPath], withRowAnimation: .Fade)
-        } else if editingStyle == .Insert {
-            // Create a new instance of the appropriate class, insert it into the array, and add a new row to the table view
-        }    
-    }
-    */
-
-    /*
-    // Override to support rearranging the table view.
-    override func tableView(tableView: UITableView, moveRowAtIndexPath fromIndexPath: NSIndexPath, toIndexPath: NSIndexPath) {
-
-    }
-    */
-
-    /*
-    // Override to support conditional rearranging of the table view.
-    override func tableView(tableView: UITableView, canMoveRowAtIndexPath indexPath: NSIndexPath) -> Bool {
-        // Return NO if you do not want the item to be re-orderable.
-        return true
-    }
-    */
 
     /*
     // MARK: - Navigation
